@@ -37,6 +37,16 @@ from .anish_loaders import (
     AnishCurvTONDataset
 )
 
+# Standalone dataloaders (created independently in dataloaders/ package)
+try:
+    from dataloaders.dresscode_dataloader import Dresscode as StandaloneDresscode
+    from dataloaders.vitonhd_dataloader import VITONHDDataset as StandaloneVITONHD
+    from dataloaders.street_tryon_dataloader import GeneralTryOnDataset as StandaloneStreetTryOn
+    from dataloaders.laion_rvs_fashion_dataloader import LAIONRVSFashionDataset as StandaloneLAION
+    _HAS_STANDALONE = True
+except ImportError:
+    _HAS_STANDALONE = False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. VITON
@@ -521,17 +531,61 @@ DATASET_REGISTRY = {
     "curvton_anish":      AnishCurvTONDataset,
 }
 
+# Register standalone dataloaders if available
+if _HAS_STANDALONE:
+    DATASET_REGISTRY.update({
+        "dresscode_standalone":    StandaloneDresscode,
+        "vitonhd_standalone":      StandaloneVITONHD,
+        "street_tryon_standalone": StandaloneStreetTryOn,
+        "laion_standalone":        StandaloneLAION,
+    })
 
-def get_dataset(name: str, root: str, **kwargs) -> BaseTryOnDataset:
-    """Factory function; returns the appropriate dataset by name."""
+# Names that use non-standard constructors (not BaseTryOnDataset)
+_STANDALONE_NAMES = {
+    "dresscode_standalone", "vitonhd_standalone",
+    "street_tryon_standalone", "laion_standalone",
+}
+_LAION_NAMES = {
+    "laion", "laion_anish", "laion_fashion", "laion_standalone",
+}
+
+
+def get_dataset(name: str, root: str, **kwargs):
+    """
+    Factory function; returns the appropriate dataset by name.
+
+    Handles three kinds of constructors:
+      1. BaseTryOnDataset subclasses   → (root=, split=, img_size=, ...)
+      2. LAION streaming loaders       → (split=, limit=, img_size=, ...)
+      3. Standalone dataloaders from dataloaders/ package → custom signatures
+    """
     name = name.lower().replace("-", "_")
     if name not in DATASET_REGISTRY:
         raise ValueError(
             f"Unknown dataset '{name}'. Available: {list(DATASET_REGISTRY)}"
         )
 
-    # Special handling for LAION (doesn't need root)
-    if name in ["laion", "laion_anish", "laion_fashion"]:
+    # ── LAION (no root needed) ────────────────────────────────────────────
+    if name in _LAION_NAMES:
         return DATASET_REGISTRY[name](**kwargs)
 
+    # ── Standalone dataloaders (custom constructors) ──────────────────────
+    if name in _STANDALONE_NAMES:
+        cls = DATASET_REGISTRY[name]
+        if name == "dresscode_standalone":
+            return cls(root_dir=root)
+        elif name == "vitonhd_standalone":
+            return cls(
+                data_root_path=root,
+                output_dir=kwargs.get("output_dir", "output"),
+                eval_pair=kwargs.get("eval_pair", False),
+            )
+        elif name == "street_tryon_standalone":
+            config = kwargs.get("config", {})
+            split = kwargs.get("split", "test")
+            return cls(dataroot=root, config=config, split=split)
+        else:
+            return cls(**kwargs)
+
+    # ── Standard BaseTryOnDataset subclasses ──────────────────────────────
     return DATASET_REGISTRY[name](root=root, **kwargs)

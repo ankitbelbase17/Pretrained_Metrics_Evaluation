@@ -64,14 +64,14 @@ sys.path.insert(0, str(_HERE.parent))   # workspace root
 
 # Thin shim → delegates entirely to datasets/loaders.py (the only source of truth)
 from pretrained_metrics.dataloader import get_dataloader, ALL_DATASETS
-from metrics.m1_pose           import PoseMetrics
-from metrics.m2_occlusion      import OcclusionMetrics
-from metrics.m3_background     import BackgroundMetrics
-from metrics.m4_illumination   import IlluminationMetrics
-from metrics.m5_body_shape     import BodyShapeMetrics
-from metrics.m6_appearance     import AppearanceMetrics
-from metrics.m7_garment_texture import GarmentTextureMetrics
-from metrics.unified_index     import UnifiedComplexityIndex
+from pretrained_metrics.metrics.m1_pose           import PoseMetrics
+from pretrained_metrics.metrics.m2_occlusion      import OcclusionMetrics
+from pretrained_metrics.metrics.m3_background     import BackgroundMetrics
+from pretrained_metrics.metrics.m4_illumination   import IlluminationMetrics
+from pretrained_metrics.metrics.m5_body_shape     import BodyShapeMetrics
+from pretrained_metrics.metrics.m6_appearance     import AppearanceMetrics
+from pretrained_metrics.metrics.m7_garment_texture import GarmentTextureMetrics
+from pretrained_metrics.metrics.unified_index     import UnifiedComplexityIndex
 
 # Configuration management
 try:
@@ -104,6 +104,15 @@ def evaluate_one_dataset(
     split      = cfg.get("split", "test")
     use_anish  = cfg.get("use_anish", False)
 
+    # Selective metric flags
+    run_pose    = cfg.get("run_pose", True)
+    run_occ     = cfg.get("run_occ", True)
+    run_bg      = cfg.get("run_bg", True)
+    run_illum   = cfg.get("run_illum", True)
+    run_shape   = cfg.get("run_shape", True)
+    run_appear  = cfg.get("run_appear", True)
+    run_garment = cfg.get("run_garment", True)
+
     # Resolve root if not provided
     if not root and config:
         root = config.get_root(dataset_name)
@@ -131,11 +140,6 @@ def evaluate_one_dataset(
                else {"category": cfg.get("dresscode_category", "upper_body")}),
         )
         n_samples = len(loader.dataset)
-    except (FileNotFoundError, RuntimeError, Exception) as e:
-        print(f"  [SKIP] {e}")
-        import traceback
-        traceback.print_exc()
-        return {}
     except (FileNotFoundError, RuntimeError, Exception) as e:
         print(f"  [SKIP] {e}")
         import traceback

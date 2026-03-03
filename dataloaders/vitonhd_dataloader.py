@@ -140,25 +140,26 @@ def custom_collate_fn(batch):
     return batch_dict
 
 
-dataset = VITONHDDataset(
-    data_root_path="zalando-hd-resized",
-    output_dir="output",
-    eval_pair=False
-)
-dataloader = DataLoader(
-    dataset,
-    batch_size=8,
-    shuffle=True,
-    collate_fn=custom_collate_fn,
-    num_workers=4,
-    pin_memory=True
-)
+if __name__ == "__main__":
+    dataset = VITONHDDataset(
+        data_root_path="zalando-hd-resized",
+        output_dir="output",
+        eval_pair=False
+    )
+    dataloader = DataLoader(
+        dataset,
+        batch_size=8,
+        shuffle=True,
+        collate_fn=custom_collate_fn,
+        num_workers=4,
+        pin_memory=True
+    )
 
-# Test one batch:
-for batch in dataloader:
-    print("Person:",   batch["person_image"].shape)
-    print("Cloth:",    batch["cloth_image"].shape)
-    print("Mask:",     batch["mask"].shape)
-    print("Overlay:",  batch["overlay_image"].shape)
-    print("Filenames:", batch["filename"])
-    break
+    # Test one batch:
+    for batch in dataloader:
+        print("Person:",   batch["person_image"].shape)
+        print("Cloth:",    batch["cloth_image"].shape)
+        print("Mask:",     batch["mask"].shape)
+        print("Overlay:",  batch["overlay_image"].shape)
+        print("Filenames:", batch["filename"])
+        break

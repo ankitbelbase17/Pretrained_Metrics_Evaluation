@@ -195,23 +195,24 @@ def custom_collate_fn(batch):
     return batch_dict
 
 
-dataset = Dresscode(root_dir="dresscode")
-dataloader = DataLoader(
-    dataset,
-    batch_size=8,
-    shuffle=True,
-    collate_fn=custom_collate_fn,
-    num_workers=4,
-    pin_memory=True
-)
+if __name__ == "__main__":
+    dataset = Dresscode(root_dir="dresscode")
+    dataloader = DataLoader(
+        dataset,
+        batch_size=8,
+        shuffle=True,
+        collate_fn=custom_collate_fn,
+        num_workers=4,
+        pin_memory=True
+    )
 
-# Test one batch:
-for batch in dataloader:
-    print("Person:",   batch["person_image"].shape)
-    print("Cloth:",    batch["cloth_image"].shape)
-    print("Normal:",   batch["normal_map"].shape)
-    print("Depth:",    batch["depth_map"].shape)
-    print("Mask:",     batch["mask"].shape)
-    print("Overlay:",  batch["overlay_image"].shape)
-    print("Captions:", batch["caption"])
-    break
+    # Test one batch:
+    for batch in dataloader:
+        print("Person:",   batch["person_image"].shape)
+        print("Cloth:",    batch["cloth_image"].shape)
+        print("Normal:",   batch["normal_map"].shape)
+        print("Depth:",    batch["depth_map"].shape)
+        print("Mask:",     batch["mask"].shape)
+        print("Overlay:",  batch["overlay_image"].shape)
+        print("Captions:", batch["caption"])
+        break

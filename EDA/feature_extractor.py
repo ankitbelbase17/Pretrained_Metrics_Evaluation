@@ -60,13 +60,19 @@ from pretrained_metrics.metrics.m6_appearance      import _FaceEmbedder
 from pretrained_metrics.metrics.m7_garment_texture import _GarmentEncoder
 
 
-# Import Anish Dataloaders
+# Import standalone dataloaders (from dataloaders/ package)
 try:
-    from dataloaders_anish.dresscode_dataloader import Dresscode as AnishDresscode, custom_collate_fn as dresscode_collate
-    from dataloaders_anish.vitonhd_dataloader import VITONHDDataset as AnishVITONHD, custom_collate_fn as vitonhd_collate
-    from dataloaders_anish.laion_rvs_fashion_dataloader import LAIONRVSFashionDataset as AnishLAION
+    from dataloaders.dresscode_dataloader import Dresscode as StandaloneDresscode, custom_collate_fn as dresscode_collate
+    from dataloaders.vitonhd_dataloader import VITONHDDataset as StandaloneVITONHD, custom_collate_fn as vitonhd_collate
+    from dataloaders.laion_rvs_fashion_dataloader import LAIONRVSFashionDataset as StandaloneLAION
+    from dataloaders import (
+        canonical_collate_dresscode,
+        canonical_collate_vitonhd,
+        canonical_collate_laion,
+    )
 except ImportError:
-    AnishDresscode = AnishVITONHD = AnishLAION = None
+    StandaloneDresscode = StandaloneVITONHD = StandaloneLAION = None
+    canonical_collate_dresscode = canonical_collate_vitonhd = canonical_collate_laion = None
 
 
 # Downsampled spatial-map resolution stored per image (keeps cache small)

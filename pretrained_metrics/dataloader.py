@@ -33,7 +33,24 @@ from torch.utils.data import DataLoader
 _WORKSPACE = Path(__file__).parent.parent   # pretrained_metrics_evals/
 sys.path.insert(0, str(_WORKSPACE))
 
-from datasets.loaders import get_dataset, DATASET_REGISTRY   # noqa: E402
+from datasets.loaders import get_dataset, DATASET_REGISTRY, _STANDALONE_NAMES   # noqa: E402
+
+# ── standalone dataloader canonical collates ─────────────────────────────────
+try:
+    from dataloaders import (
+        canonical_collate_dresscode,
+        canonical_collate_vitonhd,
+        canonical_collate_street_tryon,
+        canonical_collate_laion,
+    )
+    _STANDALONE_COLLATES = {
+        "dresscode_standalone":    canonical_collate_dresscode,
+        "vitonhd_standalone":      canonical_collate_vitonhd,
+        "street_tryon_standalone": canonical_collate_street_tryon,
+        "laion_standalone":        canonical_collate_laion,
+    }
+except ImportError:
+    _STANDALONE_COLLATES = {}
 
 # ── public API ────────────────────────────────────────────────────────────────
 ALL_DATASETS: List[str] = list(DATASET_REGISTRY.keys())
@@ -171,6 +188,11 @@ def get_dataloader(
             "Check that the root path is correct and the pairs file exists."
         )
 
+    # Choose the correct collate function:
+    # Standalone dataloaders use their own canonical collate that translates
+    # their native output keys to the standard {person, cloth, gt, mask, meta}
+    collate_fn = _STANDALONE_COLLATES.get(name, _collate)
+
     return DataLoader(
         ds,
         batch_size=batch_size,
@@ -178,5 +200,5 @@ def get_dataloader(
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
         drop_last=False,
-        collate_fn=_collate,
+        collate_fn=collate_fn,
     )
