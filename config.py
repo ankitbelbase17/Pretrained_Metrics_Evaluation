@@ -15,16 +15,18 @@ BASE_DIR = Path(__file__).parent.absolute()
 DATASET_ROOTS = {
     # Existing
     "viton":              os.getenv("VITON_ROOT", str(BASE_DIR / "VITON")),
-    "vitonhd":            os.getenv("VITONHD_ROOT", str(BASE_DIR / "zalando-hd-resized")),
-    "dresscode":          os.getenv("DRESSCODE_ROOT", str(BASE_DIR / "dresscode")),
+    "vitonhd":            os.getenv("VITONHD_ROOT", str(BASE_DIR / "benchmark_datasets" / "viton_hd")),
+    "dresscode":          os.getenv("DRESSCODE_ROOT", str(BASE_DIR / "benchmark_datasets" / "dresscode")),
     "mpv":                os.getenv("MPV_ROOT", str(BASE_DIR / "MPV")),
     "deepfashion":        os.getenv("DEEPFASHION_ROOT", str(BASE_DIR / "DeepFashion")),
-    "laion_fashion":      "huggingface", # Special flag for LAION dataset
-    
-    # New / Specific request aliases
-    "street_tryon":       os.getenv("STREET_TRYON_ROOT", str(BASE_DIR / "street_tryon")),
+    # LAION-RVS-Fashion stored locally under benchmark_datasets/
+    "laion_fashion":      os.getenv("LAION_ROOT", str(BASE_DIR / "benchmark_datasets" / "LAION-RVS-Fashion")),
+
+    # street_tryon: dataroot is benchmark_datasets/ so that YAML paths like
+    # "street_tryon/validation/image" resolve to the correct subdirectory.
+    "street_tryon":       os.getenv("STREET_TRYON_ROOT", str(BASE_DIR / "benchmark_datasets")),
     "curvton":            os.getenv("CURVTON_ROOT", str(BASE_DIR / "curvton")),
-    
+
     # Legacy / Compatibility
     "vton":               os.getenv("VITON_ROOT", str(BASE_DIR / "VITON")),
     "deepfashion_tryon":  os.getenv("DEEPFASHION_ROOT", str(BASE_DIR / "DeepFashion")),
