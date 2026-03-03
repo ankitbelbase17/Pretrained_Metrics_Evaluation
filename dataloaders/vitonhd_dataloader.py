@@ -26,33 +26,99 @@ basic_transform = transforms.Compose([
 ])
 
 class VITONHDDataset(Dataset):
-    def __init__(self, data_root_path, output_dir, eval_pair):
-    # def __init__(self, args):
+    def __init__(self, data_root_path, output_dir, eval_pair, split: str = "train"):
         self.data_root_path = data_root_path
         self.output_dir = output_dir
         self.eval_pair = eval_pair
-        # self.args = args
+        self.split = split
         self.data = self.load_data()
 
     def load_data(self):
-        assert os.path.exists(pair_txt:=os.path.join(self.data_root_path, 'train_pairs_unpaired.txt')), f"File {pair_txt} does not exist."
-        with open(pair_txt, 'r') as f:
-            lines = f.readlines()
-        self.data_root_path = os.path.join(self.data_root_path, "train")
-        output_dir = os.path.join(self.output_dir, "vitonhd", 'unpaired' if not self.eval_pair else 'paired')
+        # Resolve the split subdirectory (train / test)
+        split_root = os.path.join(self.data_root_path, self.split)
+
+        # Auto-detect mask folder: prefer "agnostic-mask", fall back to "agnostic"
+        mask_folder = "agnostic-mask"
+        if not os.path.exists(os.path.join(split_root, mask_folder)):
+            mask_folder = "agnostic"
+
+        # Build output dir path (used to skip already-generated images)
+        output_dir = os.path.join(
+            self.output_dir, "vitonhd",
+            'unpaired' if not self.eval_pair else 'paired'
+        )
+
+        # Try to locate a pairs file (several common names)
+        pair_txt = None
+        for candidate in (
+            'test_pairs.txt', 'train_pairs.txt',
+            'test_pairs_unpaired.txt', 'train_pairs_unpaired.txt',
+        ):
+            p = os.path.join(self.data_root_path, candidate)
+            if os.path.exists(p):
+                pair_txt = p
+                break
+
         data = []
-        for line in lines:
-            person_img, cloth_img = line.strip().split(" ")
-            if os.path.exists(os.path.join(output_dir, person_img)):
-                continue
-            if self.eval_pair:
-                cloth_img = person_img
-            data.append({
-                'person_name': person_img,
-                'person': os.path.join(self.data_root_path, 'image', person_img),
-                'cloth': os.path.join(self.data_root_path, 'cloth', cloth_img),
-                'mask': os.path.join(self.data_root_path, 'agnostic-mask', person_img.replace('.jpg', '_mask.png')),
-            })
+
+        if pair_txt is not None:
+            # ------------------------------------------------------------------
+            # Pairs-file mode
+            # ------------------------------------------------------------------
+            with open(pair_txt, 'r') as f:
+                lines = f.readlines()
+            for line in lines:
+                parts = line.strip().split(" ")
+                if len(parts) < 2:
+                    continue
+                person_img, cloth_img = parts[0], parts[1]
+                if os.path.exists(os.path.join(output_dir, person_img)):
+                    continue
+                if self.eval_pair:
+                    cloth_img = person_img
+                mask_name = (
+                    person_img.replace('.jpg', '_mask.png')
+                    if mask_folder == 'agnostic-mask'
+                    else person_img
+                )
+                data.append({
+                    'person_name': person_img,
+                    'person': os.path.join(split_root, 'image', person_img),
+                    'cloth':  os.path.join(split_root, 'cloth', cloth_img),
+                    'mask':   os.path.join(split_root, mask_folder, mask_name),
+                })
+        else:
+            # ------------------------------------------------------------------
+            # Fallback: scan the image directory and create pairs on the fly
+            # ------------------------------------------------------------------
+            image_dir = os.path.join(split_root, 'image')
+            if not os.path.exists(image_dir):
+                return data
+            all_images = sorted(
+                f for f in os.listdir(image_dir)
+                if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+            )
+            for i, person_img in enumerate(all_images):
+                if os.path.exists(os.path.join(output_dir, person_img)):
+                    continue
+                # Paired: cloth == person.  Unpaired: rotate to next image.
+                cloth_img = (
+                    person_img
+                    if self.eval_pair
+                    else all_images[(i + 1) % len(all_images)]
+                )
+                mask_name = (
+                    person_img.replace('.jpg', '_mask.png')
+                    if mask_folder == 'agnostic-mask'
+                    else person_img
+                )
+                data.append({
+                    'person_name': person_img,
+                    'person': os.path.join(split_root, 'image', person_img),
+                    'cloth':  os.path.join(split_root, 'cloth', cloth_img),
+                    'mask':   os.path.join(split_root, mask_folder, mask_name),
+                })
+
         return data
 
     def __len__(self):
@@ -142,9 +208,10 @@ def custom_collate_fn(batch):
 
 if __name__ == "__main__":
     dataset = VITONHDDataset(
-        data_root_path="zalando-hd-resized",
+        data_root_path="benchmark_datasets/viton_hd",
         output_dir="output",
-        eval_pair=False
+        eval_pair=True,
+        split="test",
     )
     dataloader = DataLoader(
         dataset,

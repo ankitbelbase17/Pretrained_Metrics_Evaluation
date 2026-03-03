@@ -27,11 +27,11 @@ datasets:
     root: /data/VITON
 
   - name: viton_hd
-    root: /data/VITON-HD
+    root: benchmark_datasets/viton_hd
     img_size: [1024, 768]
 
   - name: dresscode
-    root: /data/DressCode
+    root: benchmark_datasets/dresscode
     dresscode_category: upper_body
 
   - name: mpv
@@ -55,3 +55,6 @@ datasets:
 
   - name: ovnet
     root: /data/OVNet
+  - name: laion_fashion
+    root: benchmark_datasets/LAION-RVS-Fashion
+    split: train

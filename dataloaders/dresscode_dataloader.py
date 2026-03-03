@@ -196,7 +196,7 @@ def custom_collate_fn(batch):
 
 
 if __name__ == "__main__":
-    dataset = Dresscode(root_dir="dresscode")
+    dataset = Dresscode(root_dir="benchmark_datasets/dresscode")
     dataloader = DataLoader(
         dataset,
         batch_size=8,

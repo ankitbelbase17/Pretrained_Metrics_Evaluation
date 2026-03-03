@@ -25,13 +25,13 @@ datasets:
 
   # ── 2. VITON-HD ───────────────────────────────────────────────────────────
   - name: viton_hd
-    root: /data/VITON-HD
+    root: benchmark_datasets/viton_hd
     pred_dir: /results/my_model/viton_hd
     img_size: [1024, 768]
 
   # ── 3. DressCode ──────────────────────────────────────────────────────────
   - name: dresscode
-    root: /data/DressCode
+    root: benchmark_datasets/dresscode
     pred_dir: /results/my_model/dresscode
     dresscode_category: upper_body      # or lower_body / dresses
 
@@ -70,3 +70,9 @@ datasets:
   - name: ovnet
     root: /data/OVNet
     pred_dir: /results/my_model/ovnet
+
+  # ── 11. LAION-RVS-Fashion ─────────────────────────────────────────────────
+  - name: laion_fashion
+    root: benchmark_datasets/LAION-RVS-Fashion
+    pred_dir: /results/my_model/laion_fashion
+    split: train
