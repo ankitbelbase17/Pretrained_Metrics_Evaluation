@@ -26,14 +26,19 @@ class AnishDressCodeDataset(BaseTryOnDataset):
             cloth_dir = cat_path / "cloth"
             mask_dir = cat_path / "mask"
             if not person_dir.exists(): continue
-            
+
             for img_file in os.listdir(person_dir):
                 if not img_file.lower().endswith(('.png', '.jpg', '.jpeg')): continue
-                base_name = os.path.splitext(img_file)[0]
+                base_name, ext = os.path.splitext(img_file)
+                # DressCode naming convention: person = *_0.jpg, cloth = *_1.jpg
+                if base_name.endswith('_0'):
+                    cloth_file = base_name[:-1] + '1' + ext
+                else:
+                    cloth_file = img_file   # fallback: same name
                 data.append({
                     'id': base_name,
                     'person_path': person_dir / img_file,
-                    'cloth_path': cloth_dir / img_file,
+                    'cloth_path': cloth_dir / cloth_file,
                     'mask_path': mask_dir / f"{base_name}.png",
                     'category': cat
                 })
@@ -138,13 +143,38 @@ class AnishCurvTONDataset(AnishVITONHDDataset):
 # LAION Streaming Loader
 # ─────────────────────────────────────────────────────────────────────────────
 class AnishLAIONDataset(Dataset):
-    """Dedicated LAION loader from HuggingFace streaming."""
-    def __init__(self, split="train", limit=1000, img_size=(512, 384), **kwargs):
+    """LAION loader: prefers local HuggingFace-on-disk cache, falls back to streaming."""
+    def __init__(self, split="test", limit=1000, img_size=(512, 384), local_dir=None, **kwargs):
+        from pathlib import Path as _Path
+        self.transform = default_transform(img_size)
+        self.data = []
+
+        # Resolve local dataset directory
+        if local_dir is None:
+            _workspace = _Path(__file__).parent.parent
+            local_dir = _workspace / "benchmark_datasets" / "LAION-RVS-Fashion"
+        else:
+            local_dir = _Path(local_dir)
+
+        if local_dir.exists():
+            try:
+                from datasets import load_from_disk
+                ds = load_from_disk(str(local_dir))
+                # DatasetDict or plain Dataset saved with save_to_disk
+                try:
+                    hf_ds = ds[split]
+                except (KeyError, TypeError):
+                    hf_ds = ds
+                for i in range(min(len(hf_ds), limit)):
+                    self.data.append(hf_ds[i])
+                return   # loaded from disk – done
+            except Exception:
+                pass  # fall through to streaming
+
+        # Fallback: stream from HuggingFace Hub
         from datasets import load_dataset
         self.hf_dataset = load_dataset("Slep/LAION-RVS-Fashion", streaming=True)[split]
         self.limit = limit
-        self.transform = default_transform(img_size)
-        self.data = []
         self._prepare()
 
     def _prepare(self):
