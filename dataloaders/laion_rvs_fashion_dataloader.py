@@ -20,6 +20,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 import torchvision.transforms as T
+from pathlib import Path
 
 
 class LAIONRVSFashionDataset(Dataset):
@@ -41,20 +42,56 @@ class LAIONRVSFashionDataset(Dataset):
         split: str = "train",
         limit: int = 1000,
         img_size: tuple = (512, 384),
+        local_dir: str | Path | None = None,
         **kwargs,
     ):
         from datasets import load_dataset as hf_load_dataset
+        from datasets import load_from_disk
 
         self.transform = T.Compose([T.Resize(img_size), T.ToTensor()])
         self.data = []
 
-        hf_ds = hf_load_dataset("Slep/LAION-RVS-Fashion", streaming=True)[split]
-        it = iter(hf_ds)
-        for _ in range(limit):
+        # Prefer a local dataset if provided or available under
+        # `benchmark_datasets/LAION-RVS-Fashion` (exported HF format).
+        if local_dir is None:
+            local_candidate = Path.cwd() / "benchmark_datasets" / "LAION-RVS-Fashion"
+        else:
+            local_candidate = Path(local_dir)
+
+        if local_candidate.exists():
             try:
-                self.data.append(next(it))
-            except StopIteration:
-                break
+                ds = load_from_disk(str(local_candidate))
+            except Exception:
+                ds = None
+
+            if ds is not None:
+                # DatasetDict or Dataset saved on disk
+                try:
+                    hf_ds = ds[split]
+                except Exception:
+                    hf_ds = ds
+
+                # Materialise up to `limit` samples via indexing (non-streaming)
+                for i in range(min(len(hf_ds), limit)):
+                    self.data.append(hf_ds[i])
+            else:
+                # Fallback to streaming from HF hub
+                hf_ds = hf_load_dataset("Slep/LAION-RVS-Fashion", streaming=True)[split]
+                it = iter(hf_ds)
+                for _ in range(limit):
+                    try:
+                        self.data.append(next(it))
+                    except StopIteration:
+                        break
+        else:
+            # Default: streaming from HuggingFace Hub
+            hf_ds = hf_load_dataset("Slep/LAION-RVS-Fashion", streaming=True)[split]
+            it = iter(hf_ds)
+            for _ in range(limit):
+                try:
+                    self.data.append(next(it))
+                except StopIteration:
+                    break
 
     def __len__(self) -> int:
         return len(self.data)
