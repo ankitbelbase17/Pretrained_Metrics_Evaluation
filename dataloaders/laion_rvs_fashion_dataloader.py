@@ -45,8 +45,9 @@ class LAIONRVSFashionDataset(Dataset):
         local_dir: str | Path | None = None,
         **kwargs,
     ):
-        from datasets import load_dataset as hf_load_dataset
-        from datasets import load_from_disk
+        from datasets import _hf_import
+        hf_load_dataset = _hf_import("load_dataset")
+        load_from_disk  = _hf_import("load_from_disk")
 
         self.transform = T.Compose([T.Resize(img_size), T.ToTensor()])
         self.data = []
@@ -121,7 +122,8 @@ class LAIONRVSFashionDataset(Dataset):
 
 
 if __name__ == "__main__":
-    from datasets import load_dataset
+    from datasets import _hf_import
+    load_dataset = _hf_import("load_dataset")
 
     dataset = load_dataset(
         "Slep/LAION-RVS-Fashion",
