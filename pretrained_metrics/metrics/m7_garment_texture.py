@@ -134,6 +134,8 @@ class _GarmentEncoder:
         pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in imgs]
         inputs = self._hf_proc(images=pils, return_tensors="pt", padding=True).to(self.device)
         emb = self._hf_model.get_image_features(**inputs)
+        if not isinstance(emb, torch.Tensor):
+            emb = emb.pooler_output
         emb = F.normalize(emb.float(), dim=-1)
         return emb.cpu().numpy()
 
