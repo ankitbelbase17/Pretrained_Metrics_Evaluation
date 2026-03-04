@@ -133,12 +133,15 @@ class UnifiedComplexityIndex:
             else:
                 final_score = float("nan")
 
-            out.append({
+            entry = {
                 "dataset":            rec["dataset"],
                 "unified_score":      final_score,
                 "normalised_metrics": z_scores,
                 "raw_metrics":        {k: rec.get(k, float("nan")) for k, _ in METRIC_KEYS},
-            })
+            }
+            if "dresscode_category" in rec:
+                entry["dresscode_category"] = rec["dresscode_category"]
+            out.append(entry)
 
         return out
 
@@ -150,7 +153,10 @@ class UnifiedComplexityIndex:
         print(f"  {'UNIFIED DATASET COMPLEXITY INDEX':^{W-4}}")
         print("═" * W)
         for d in scores:
-            print(f"\n  ► {d['dataset'].upper()}")
+            label = d['dataset'].upper()
+            if 'dresscode_category' in d:
+                label = f"{label} [{d['dresscode_category']}]"
+            print(f"\n  ► {label}")
             print(f"    {'Metric':<35} {'Raw':>12}  {'Normalised':>12}")
             print(f"    {'─'*35} {'─'*12}  {'─'*12}")
             for mk, label in METRIC_KEYS:

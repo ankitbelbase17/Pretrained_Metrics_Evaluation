@@ -689,4 +689,16 @@ def get_dataset(name: str, root: str, **kwargs):
             return cls(**kwargs)
 
     # ── Standard BaseTryOnDataset subclasses ──────────────────────────────
-    return DATASET_REGISTRY[name](root=root, **kwargs)
+    # Translate 'dresscode_category' → 'category' for DressCode loaders and
+    # strip any keys that BaseTryOnDataset.__init__ doesn't accept.
+    _DRESSCODE_NAMES = {"dresscode", "dresscode_anish"}
+    if name in _DRESSCODE_NAMES and "dresscode_category" in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["category"] = kwargs.pop("dresscode_category")
+
+    # Keys that every BaseTryOnDataset accepts; drop everything else so
+    # unrecognised kwargs (e.g. run_pose, use_anish …) don't propagate.
+    _BASE_KEYS = {"split", "img_size", "transform", "category"}
+    clean_kwargs = {k: v for k, v in kwargs.items() if k in _BASE_KEYS}
+
+    return DATASET_REGISTRY[name](root=root, **clean_kwargs)

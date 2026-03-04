@@ -182,8 +182,10 @@ def evaluate_one_dataset(
     r6 = m6.compute() if m6 else {}
     r7 = m7.compute() if m7 else {}
 
+    dresscode_cat = cfg.get("dresscode_category") if "dresscode" in dataset_name.lower() else None
     result = {
         "dataset":   dataset_name,
+        **({"dresscode_category": dresscode_cat} if dresscode_cat else {}),
         "n_samples": n_samples,
         "elapsed_s": round(elapsed, 2),
         **r1, **r2, **r3, **r4, **r5, **r6, **r7,
@@ -236,6 +238,8 @@ def _fmt(v):
 def _print_result_box(r: dict):
     W = 62
     name = r["dataset"].upper()
+    if "dresscode_category" in r:
+        name = f"{name} [{r['dresscode_category']}]"
     print(f"\n  ┌{'─'*W}┐")
     print(f"  │{'Results — ' + name:^{W}}│")
     print(f"  ├{'─'*W}┤")
