@@ -153,16 +153,22 @@ class _GarmentEncoder:
 
 class GarmentTextureMetrics:
 
-    def __init__(self, device: str = "cpu", eps: float = 1e-6, rel_eps: float = 0.01):
+    def __init__(self, device: str = "cpu", eps: float = 1e-6,
+                 n_components: int = 128):
         """
-        eps     : absolute regularisation floor (added to every eigenvalue).
-        rel_eps : relative regularisation — λ_reg = max(eps, rel_eps × mean_eigval).
-                  Prevents log-det collapse for rank-deficient covariance matrices
-                  (typical with L2-normalised CLIP embeddings in high-D spaces).
+        n_components : number of PCA components to keep before computing
+                       log-det.  Avoids the rank-deficiency collapse that
+                       occurs when D (e.g. 512 or 768) >> effective rank of
+                       L2-normalised embeddings.  Only the top-k singular
+                       values that carry real signal are included; the
+                       discarded near-zero dimensions no longer contribute
+                       large negative log terms.
+        eps          : small absolute floor added to each retained eigenvalue
+                       for numerical safety.
         """
-        self._encoder   = _GarmentEncoder(device)
-        self.eps        = eps
-        self.rel_eps    = rel_eps
+        self._encoder    = _GarmentEncoder(device)
+        self.eps         = eps
+        self.n_components = n_components
         self._embeddings: List[np.ndarray] = []
 
     # ------------------------------------------------------------------ #
@@ -175,7 +181,8 @@ class GarmentTextureMetrics:
     # ------------------------------------------------------------------ #
     def compute(self) -> Dict[str, float]:
         D = self._encoder.embed_dim
-        if len(self._embeddings) < 2:
+        N = len(self._embeddings)
+        if N < 2:
             return {
                 "garment_diversity_logdet": float("nan"),
                 "garment_variance_total":   float("nan"),
@@ -184,27 +191,29 @@ class GarmentTextureMetrics:
 
         E  = np.stack(self._embeddings, axis=0)        # (N, D)
         mu = E.mean(axis=0, keepdims=True)
-        Ec = E - mu
-        cov = (Ec.T @ Ec) / max(len(E) - 1, 1)        # (D, D)
+        Ec = E - mu                                     # centred (N, D)
 
-        # ── Adaptive regularisation ───────────────────────────────────────────
-        # CLIP embeddings are L2-normalised, so cov is rank-deficient
-        # (rank ≤ N-1 ≪ D=512).  A fixed tiny eps like 1e-6 leaves hundreds of
-        # near-zero eigenvalues each contributing log(1e-6) ≈ -13.8, collapsing
-        # log-det to -∞.  Instead, scale the regulariser to the data's own
-        # spectral magnitude: λ = max(eps_abs, rel_eps × mean_eigenvalue).
-        eigvals   = np.linalg.eigvalsh(cov)            # (D,) ascending
-        mean_eig  = float(np.abs(eigvals).mean())
-        lambda_reg = max(self.eps, self.rel_eps * mean_eig)
-        reg_eigvals = eigvals + lambda_reg             # (D,) all positive
+        # ── PCA via thin SVD ──────────────────────────────────────────────────
+        # Ec = U S Vt  →  eigenvalues of Cov = S² / (N-1)
+        # We keep only the top-k components where k = min(N-1, D, n_components).
+        # This avoids summing log over hundreds of near-zero null-space dims
+        # that arise because (a) N-1 < D and/or (b) L2 normalisation constrains
+        # embeddings to a low-dimensional sub-manifold.
+        k = min(N - 1, D, self.n_components)
+        _, S, _ = np.linalg.svd(Ec, full_matrices=False)   # S shape: (min(N,D),)
+        S = S[:k]                                           # top-k singular values
+        eigvals = (S ** 2) / max(N - 1, 1)                 # (k,) eigenvalues
 
-        log_det   = float(np.sum(np.log(np.maximum(reg_eigvals, 1e-30))))
-        total_var = float(eigvals.sum())               # raw variance (no reg)
+        # Light absolute regularisation (just prevents log(0) for tiny eigvals)
+        reg_eigvals = eigvals + self.eps
+
+        log_det   = float(np.sum(np.log(reg_eigvals)))
+        total_var = float(eigvals.sum())
 
         return {
             "garment_diversity_logdet": log_det,
             "garment_variance_total":   total_var,
-            "garment_embed_dim":        float(D),
+            "garment_embed_dim":        float(k),   # effective dims used
         }
 
     def reset(self):
