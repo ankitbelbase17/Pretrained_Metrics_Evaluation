@@ -151,9 +151,18 @@ class _SegBackend:
         dilate the arms mask by a small amount so that arm-edge pixels bleed
         into the garment region, simulating partial occlusion.
         """
+        import numpy as np
         from PIL import Image as PILImage
 
-        pils   = [TF.to_pil_image(img.clamp(0, 1).cpu()).convert("RGB") for img in imgs]
+        pils = []
+        for img in imgs:
+            t = img.clamp(0, 1).cpu()
+            if t.ndim == 3 and t.shape[0] == 1:    # (1, H, W) grayscale → RGB
+                t = t.repeat(3, 1, 1)
+            elif t.ndim == 3 and t.shape[0] == 4:  # (4, H, W) RGBA → drop alpha
+                t = t[:3]
+            arr = (t.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+            pils.append(PILImage.fromarray(arr, mode="RGB"))
         inputs = self._processor(images=pils, return_tensors="pt").to(self.device)
         logits = self._model(**inputs).logits        # (B, C, h', w')
 
