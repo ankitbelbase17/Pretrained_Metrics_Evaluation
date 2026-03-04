@@ -286,6 +286,44 @@ def dry_run(device: str = "cpu"):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Checkpoint helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _checkpoint_key(name: str, cfg: dict) -> str:
+    """Unique string key for a dataset entry (includes dresscode category)."""
+    cat = cfg.get("dresscode_category", "")
+    return f"{name}__{cat}" if cat else name
+
+
+def _load_checkpoint(output_dir: str) -> dict:
+    """
+    Load existing checkpoint from output_dir/checkpoint.json.
+    Returns a dict mapping checkpoint_key → result dict.
+    """
+    path = Path(output_dir) / "checkpoint.json"
+    if not path.exists():
+        return {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        # data is {key: result_dict}
+        print(f"  [Resume] Loaded {len(data)} completed dataset(s) from {path}")
+        return data
+    except Exception as e:
+        print(f"  [Resume] Could not read checkpoint ({e}). Starting fresh.")
+        return {}
+
+
+def _write_checkpoint(checkpoint: dict, output_dir: str):
+    """Persist the checkpoint dict to disk (overwrite)."""
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "checkpoint.json"
+    with open(path, "w") as f:
+        json.dump(checkpoint, f, indent=2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Save results
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -342,6 +380,8 @@ def _parse():
                    default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--dresscode_category", type=str, default="upper_body")
     p.add_argument("--use_anish", action="store_true", help="Use dedicated dataloaders from dataloaders_anish/")
+    p.add_argument("--no_resume",  action="store_true",
+                   help="Ignore existing checkpoint and re-evaluate all datasets.")
     # Selective metrics
     p.add_argument("--no_pose",    action="store_true")
     p.add_argument("--no_occ",     action="store_true")
@@ -377,7 +417,12 @@ def main():
         run_garment= not args.no_garment,
     )
 
-    all_results: List[dict] = []
+    output_dir = args.output_dir
+
+    # ── Checkpoint (resume) ───────────────────────────────────────────────────
+    resume = not args.no_resume
+    checkpoint: dict = _load_checkpoint(output_dir) if resume else {}
+    all_results: List[dict] = list(checkpoint.values())   # seed with already-done
 
     # ── Multi-dataset YAML ────────────────────────────────────────────────────
     if args.config:
@@ -389,19 +434,38 @@ def main():
             name = cfg.pop("name")
             root = cfg.pop("root")
             cfg.pop("pred_dir", None)
-            res  = evaluate_one_dataset(name, root, cfg)
+
+            key = _checkpoint_key(name, cfg)
+            if key in checkpoint:
+                print(f"\n  [Skip] {name} (already in checkpoint — use --no_resume to recompute)")
+                continue
+
+            res = evaluate_one_dataset(name, root, cfg)
             if res:
                 all_results.append(res)
+                checkpoint[key] = res
+                _write_checkpoint(checkpoint, output_dir)   # save after every dataset
+                print(f"  [Checkpoint] Saved progress ({len(checkpoint)} dataset(s) done).")
 
     # ── Single dataset ────────────────────────────────────────────────────────
     elif args.dataset and args.root:
-        res = evaluate_one_dataset(args.dataset, args.root, base_cfg)
-        if res:
-            all_results.append(res)
+        key = _checkpoint_key(args.dataset, base_cfg)
+        if key in checkpoint and resume:
+            print(f"\n  [Skip] {args.dataset} already in checkpoint. Use --no_resume to recompute.")
+        else:
+            res = evaluate_one_dataset(args.dataset, args.root, base_cfg)
+            if res:
+                all_results.append(res)
+                checkpoint[key] = res
+                _write_checkpoint(checkpoint, output_dir)
 
     else:
         print("[INFO] No action specified. Use --dry_run, --dataset+--root, or --config.")
         print(f"[INFO] Available datasets: {ALL_DATASETS}")
+        return
+
+    if not all_results:
+        print("\n  No results to save.")
         return
 
     # ── Unified Complexity Index ───────────────────────────────────────────────
@@ -411,8 +475,8 @@ def main():
     uci_scores = uci.compute_scores()
     uci.print_report(uci_scores)
 
-    # ── Save ──────────────────────────────────────────────────────────────────
-    _save(all_results, args.output_dir, uci_scores)
+    # ── Final consolidated save ───────────────────────────────────────────────
+    _save(all_results, output_dir, uci_scores)
 
 
 if __name__ == "__main__":
