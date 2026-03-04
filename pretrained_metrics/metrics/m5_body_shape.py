@@ -161,11 +161,16 @@ class _ShapeExtractor:
     # ------------------------------------------------------------------ #
     def _hmr2_forward(self, imgs: torch.Tensor) -> np.ndarray:
         """
-        HMR2.0 expects images at 256x192 (WxH), normalised with ImageNet stats.
-        Output dict contains 'pred_smpl_params' -> 'betas' : (B, 10).
+        HMR2.0 ViT backbone internally crops 32 px from each side of the width:
+            x[:, :, :, 32:-32]
+        So the model needs input (B, 3, 256, 256); after the crop the effective
+        size is 192 wide x 256 tall  ->  12 x 16 = 192 patches, which matches
+        the pretrained pos_embed of size 192.
+        Passing [192, 256] instead produced a 192x192 crop (144 patches) and
+        caused the RuntimeError: size 144 != 192.
         """
-        # HMR2.0 canonical input size: 256 wide x 192 tall
-        x = TF.resize(imgs, [192, 256]).to(self.device)
+        # Resize to 256x256 so the internal 32-px crop leaves 192 wide x 256 tall
+        x = TF.resize(imgs, [256, 256]).to(self.device)
         x = torch.stack([self._NORMALIZE(im) for im in x])
 
         batch = {"img": x}
