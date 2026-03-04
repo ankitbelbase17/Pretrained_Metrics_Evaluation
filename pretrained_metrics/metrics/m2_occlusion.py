@@ -153,7 +153,7 @@ class _SegBackend:
         """
         from PIL import Image as PILImage
 
-        pils   = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in imgs]
+        pils   = [TF.to_pil_image(img.clamp(0, 1).cpu()).convert("RGB") for img in imgs]
         inputs = self._processor(images=pils, return_tensors="pt").to(self.device)
         logits = self._model(**inputs).logits        # (B, C, h', w')
 
