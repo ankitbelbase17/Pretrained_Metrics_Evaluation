@@ -85,12 +85,12 @@ class _ShapeExtractor:
     # ------------------------------------------------------------------ #
     def _try_hmr2(self) -> bool:
         try:
-            from hmr2.models import download_models, load_hmr2
+            from hmr2.models import download_models, load_hmr2, DEFAULT_CHECKPOINT
 
-            # Downloads weights from HuggingFace automatically on first call.
-            # Cached to ~/.cache/huggingface/ afterwards — no manual steps needed.
-            model_path, cfg = download_models()
-            self._hmr2_model, self._hmr2_cfg = load_hmr2(model_path)
+            # download_models() fetches the checkpoint if not already cached.
+            # It returns None — the actual path is exposed via DEFAULT_CHECKPOINT.
+            download_models()
+            self._hmr2_model, self._hmr2_cfg = load_hmr2(DEFAULT_CHECKPOINT)
             self._hmr2_model = self._hmr2_model.to(self.device).eval()
 
             self._backend = "hmr2"
