@@ -93,6 +93,41 @@ class LAIONRVSFashionDataset(Dataset):
                     self.data.append(next(it))
                 except StopIteration:
                     break
+                except Exception:
+                    # CastError (schema mismatch on a shard) terminates the generator;
+                    # break and fall through to the data-*.parquet retry below.
+                    break
+
+        # Retry with raw parquet builder if the primary stream yielded nothing.
+        # distractors_metadata.parquet has an extra CATEGORY column and a null
+        # PRODUCT_ID that cause CastError when datasets tries to cast to the
+        # schema declared in the dataset card.  Loading as "parquet" with an
+        # explicit data_files glob skips that shard and auto-detects features.
+        if not self.data:
+            import warnings
+            warnings.warn(
+                "[LAIONRVSFashionDataset] Primary stream yielded no data (likely "
+                "CastError on distractors_metadata.parquet). "
+                "Retrying with data-*.parquet shards only.",
+                stacklevel=2,
+            )
+            try:
+                _glob = f"hf://datasets/Slep/LAION-RVS-Fashion/data/{split}/data-*.parquet"
+                fallback_ds = hf_load_dataset(
+                    "parquet",
+                    data_files={split: _glob},
+                    streaming=True,
+                )[split]
+                it = iter(fallback_ds)
+                for _ in range(limit):
+                    try:
+                        self.data.append(next(it))
+                    except StopIteration:
+                        break
+                    except Exception:
+                        break
+            except Exception:
+                pass  # leave self.data empty; caller handles missing data
 
     def __len__(self) -> int:
         return len(self.data)

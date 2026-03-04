@@ -200,11 +200,40 @@ class AnishLAIONDataset(Dataset):
         self.limit = limit
         self._prepare()
 
+        # If the primary stream yielded nothing (e.g. CastError on a parquet shard
+        # whose schema differs from the dataset card – typically
+        # distractors_metadata.parquet has an extra CATEGORY column), retry by
+        # loading only the well-formed data-*.parquet shards via the raw parquet
+        # builder, which auto-detects features per-file and never raises CastError.
+        if not self.data:
+            import warnings
+            warnings.warn(
+                "[AnishLAIONDataset] Streaming load failed (likely schema mismatch "
+                "in distractors_metadata.parquet). Retrying with data-*.parquet shards only.",
+                stacklevel=2,
+            )
+            try:
+                _glob = f"hf://datasets/Slep/LAION-RVS-Fashion/data/{split}/data-*.parquet"
+                self.hf_dataset = _load_dataset(
+                    "parquet",
+                    data_files={split: _glob},
+                    streaming=True,
+                )[split]
+                self._prepare()
+            except Exception:
+                pass  # leave self.data empty; caller handles missing data
+
     def _prepare(self):
         it = iter(self.hf_dataset)
         for _ in range(self.limit):
-            try: self.data.append(next(it))
-            except StopIteration: break
+            try:
+                self.data.append(next(it))
+            except StopIteration:
+                break
+            except Exception:
+                # CastError (schema mismatch) or other per-shard failure terminates
+                # the HuggingFace generator entirely – break rather than spinning.
+                break
 
     def __len__(self): return len(self.data)
 
