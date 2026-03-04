@@ -153,9 +153,16 @@ class _GarmentEncoder:
 
 class GarmentTextureMetrics:
 
-    def __init__(self, device: str = "cpu", eps: float = 1e-6):
+    def __init__(self, device: str = "cpu", eps: float = 1e-6, rel_eps: float = 0.01):
+        """
+        eps     : absolute regularisation floor (added to every eigenvalue).
+        rel_eps : relative regularisation — λ_reg = max(eps, rel_eps × mean_eigval).
+                  Prevents log-det collapse for rank-deficient covariance matrices
+                  (typical with L2-normalised CLIP embeddings in high-D spaces).
+        """
         self._encoder   = _GarmentEncoder(device)
         self.eps        = eps
+        self.rel_eps    = rel_eps
         self._embeddings: List[np.ndarray] = []
 
     # ------------------------------------------------------------------ #
@@ -180,17 +187,22 @@ class GarmentTextureMetrics:
         Ec = E - mu
         cov = (Ec.T @ Ec) / max(len(E) - 1, 1)        # (D, D)
 
-        # Regularise
-        reg_cov = cov + self.eps * np.eye(D)
+        # ── Adaptive regularisation ───────────────────────────────────────────
+        # CLIP embeddings are L2-normalised, so cov is rank-deficient
+        # (rank ≤ N-1 ≪ D=512).  A fixed tiny eps like 1e-6 leaves hundreds of
+        # near-zero eigenvalues each contributing log(1e-6) ≈ -13.8, collapsing
+        # log-det to -∞.  Instead, scale the regulariser to the data's own
+        # spectral magnitude: λ = max(eps_abs, rel_eps × mean_eigenvalue).
+        eigvals   = np.linalg.eigvalsh(cov)            # (D,) ascending
+        mean_eig  = float(np.abs(eigvals).mean())
+        lambda_reg = max(self.eps, self.rel_eps * mean_eig)
+        reg_eigvals = eigvals + lambda_reg             # (D,) all positive
 
-        sign, log_det = np.linalg.slogdet(reg_cov)
-        d_garment = float(log_det) if sign > 0 else float("nan")
-
-        eigvals = np.linalg.eigvalsh(reg_cov)
-        total_var = float(eigvals.sum())
+        log_det   = float(np.sum(np.log(np.maximum(reg_eigvals, 1e-30))))
+        total_var = float(eigvals.sum())               # raw variance (no reg)
 
         return {
-            "garment_diversity_logdet": d_garment,
+            "garment_diversity_logdet": log_det,
             "garment_variance_total":   total_var,
             "garment_embed_dim":        float(D),
         }
