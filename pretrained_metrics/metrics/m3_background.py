@@ -160,7 +160,7 @@ class _ObjectDetector:
                 # Zero-out person region so DETR focuses on background
                 img_masked = imgs[i].clone()
                 img_masked[:, person_masks[i]] = 0.0
-                pil = TF.to_pil_image(img_masked.clamp(0, 1))
+                pil = TF.to_pil_image(img_masked.clamp(0, 1).cpu()).convert("RGB")
                 inputs = self._feature(images=pil, return_tensors="pt").to(self.device)
                 outs   = self._model(**inputs)
                 probs  = outs.logits.softmax(-1)[0, :, :-1]   # drop 'no-object'
