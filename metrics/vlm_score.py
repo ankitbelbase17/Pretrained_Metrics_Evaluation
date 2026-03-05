@@ -3,9 +3,14 @@ metrics/vlm_score.py
 =====================
 VLM Plausibility Score for Virtual Try-On (Continuous 0-1 Scale).
 
-Evaluates virtual try-on images using a Vision-Language Model with a 
-comprehensive prompt that assesses multiple aspects of realism:
+Uses Qwen3-VL-32B-Instruct for multi-image evaluation of virtual try-on results.
 
+Evaluates virtual try-on images by comparing:
+  - Image A: Original person image (identity ground truth)
+  - Image B: Target garment image (garment ground truth)  
+  - Image C: Generated try-on result (what we evaluate)
+
+Evaluation Criteria:
   1. Photorealism - Fabric texture, wrinkles, shading naturalness
   2. Lighting Consistency - Matching scene lighting, shadows, highlights
   3. Color/Intensity Matching - Exposure and brightness consistency
@@ -29,8 +34,8 @@ Score Interpretation:
 
 Backend
 -------
-Primary  : BLIP-2 (Salesforce/blip2-opt-2.7b via HuggingFace Transformers)
-Fallback : InstructBLIP if BLIP-2 fails to load
+Primary  : Qwen3-VL-32B-Instruct (with flash_attention_2)
+Fallback : Qwen2-VL-7B-Instruct
 Stub     : neutral 0.5 if no VLM can be loaded
 
 Usage
@@ -39,18 +44,22 @@ Usage
 
     metric = VLMScoreMetric(device="cuda")
 
-    # evaluate.py per-batch call:
-    detailed = metric.compute_batch(pred_tensor)
-    # Returns list[dict]:
-    # [{'vlm_score': 0.85, 'reason': 'Good lighting match...'}, ...]
+    # With all three images (recommended):
+    results = metric.compute_batch(
+        tryon_images,
+        person_images=person_imgs,
+        cloth_images=cloth_imgs,
+    )
+    # Returns list[dict]: [{'vlm_score': 0.85, 'reason': '...'}, ...]
 
     # Back-compat: scalar list
-    scalars = metric.compute_batch_scalar(pred_tensor)
+    scalars = metric.compute_batch_scalar(tryon_images)
     # Returns list[float]: [0.85, ...]
 """
 
 from __future__ import annotations
 
+import gc
 import json
 import re
 from typing import Dict, List, Optional
@@ -67,8 +76,9 @@ import torchvision.transforms.functional as TF
 _SYSTEM_PROMPT = """You are an expert evaluator for virtual try-on systems. Your task is to judge whether a generated try-on image looks realistic and naturally integrated with the original in-the-wild photograph.
 
 Inputs you will receive:
-1. An in-the-wild image of a person.
-2. A generated virtual try-on image where a garment has been applied to the person.
+1. An in-the-wild image of a person (Image A - Person Ground Truth).
+2. A garment image (Image B - Garment Ground Truth).
+3. A generated virtual try-on image where the garment has been applied to the person (Image C - Try-On Result).
 
 Your task is to evaluate how realistic and well-integrated the try-on result is.
 
@@ -137,8 +147,6 @@ Return ONLY a JSON object:
   "reason": "<short explanation mentioning lighting, blending, realism, or artifacts>"
 }"""
 
-_EVAL_PROMPT = "Evaluate this virtual try-on image for realism. Return JSON with score (0-1) and reason."
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper: Parse JSON response from VLM
@@ -169,6 +177,19 @@ def _parse_vlm_response(text: str, fallback_score: float = 0.5) -> Dict[str, any
     except (json.JSONDecodeError, ValueError, KeyError):
         pass
     
+    # Try to find a more complex JSON structure
+    try:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1:
+            data = json.loads(text[start:end + 1])
+            score = float(data.get("score", fallback_score))
+            reason = str(data.get("reason", ""))
+            score = max(0.0, min(1.0, score))
+            return {"vlm_score": score, "reason": reason}
+    except (json.JSONDecodeError, ValueError, KeyError):
+        pass
+    
     # Fallback: try to extract any float from text
     nums = re.findall(r"0?\.\d+|\d+\.?\d*", text)
     for num_str in nums:
@@ -191,30 +212,40 @@ def _parse_vlm_response(text: str, fallback_score: float = 0.5) -> Dict[str, any
 
 class VLMScoreMetric:
     """
-    VLM-based plausibility scorer for virtual try-on.
+    Qwen3-VL-based plausibility scorer for virtual try-on.
     
-    Outputs a continuous score between 0 and 1 based on comprehensive
-    evaluation of photorealism, lighting, blending, and scene consistency.
+    Uses multi-image input to evaluate try-on quality by comparing:
+      - Person image (identity preservation)
+      - Garment image (garment fidelity)
+      - Try-on result (what we evaluate)
+    
+    Outputs a continuous score between 0 and 1.
 
     Parameters
     ----------
-    model_name  : HuggingFace model ID (default: BLIP-2 opt-2.7b).
+    model_name  : HuggingFace model ID (default: Qwen3-VL-32B-Instruct).
     device      : 'cpu' | 'cuda' | 'cuda:N'.
     vlm_batch   : Max images per VLM forward pass (reduce if OOM).
     neutral     : Fallback score when VLM unavailable (default 0.5).
+    max_new_tokens : Max tokens for generation (default 300).
+    image_size  : Size to resize images to (default 512).
     """
 
     def __init__(
         self,
-        model_name: str = "Salesforce/blip2-opt-2.7b",
-        device: str = "cpu",
-        vlm_batch: int = 2,
+        model_name: str = "Qwen/Qwen3-VL-32B-Instruct",
+        device: str = "cuda",
+        vlm_batch: int = 1,
         neutral: float = 0.5,
+        max_new_tokens: int = 300,
+        image_size: int = 512,
         **kwargs,  # Accept legacy kwargs for backward compatibility
     ):
         self.device = device
         self.vlm_batch = vlm_batch
         self.neutral = neutral
+        self.max_new_tokens = max_new_tokens
+        self.image_size = image_size
 
         self._model = None
         self._processor = None
@@ -224,85 +255,179 @@ class VLMScoreMetric:
     # ── Model loading ────────────────────────────────────────────────────── #
 
     def _load_model(self, model_name: str):
-        # ── Try BLIP-2 ────────────────────────────────────────────────────
+        """Load Qwen3-VL model with fallback chain."""
+        
+        # ── Try Qwen3-VL-32B-Instruct ─────────────────────────────────────
         try:
-            from transformers import Blip2Processor, Blip2ForConditionalGeneration
-            print(f"[VLMScore] Loading BLIP-2: {model_name} …")
-            self._processor = Blip2Processor.from_pretrained(model_name)
-            self._model = Blip2ForConditionalGeneration.from_pretrained(
+            from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+            print(f"[VLMScore] Loading Qwen3-VL: {model_name} …")
+            
+            self._processor = AutoProcessor.from_pretrained(
+                model_name, 
+                trust_remote_code=True
+            )
+            self._processor.tokenizer.padding_side = "left"
+            
+            self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 model_name,
-                torch_dtype=torch.float16 if "cuda" in self.device else torch.float32,
-                device_map=self.device,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                device_map=None,
+                trust_remote_code=True,
             )
+            self._model.to(self.device)
             self._model.eval()
-            self._backend = "blip2"
-            print("[VLMScore] BLIP-2 loaded.")
+            self._backend = "qwen3vl"
+            print(f"[VLMScore] Qwen3-VL loaded ✓ (flash_attention_2)")
             return
         except Exception as e:
-            print(f"[VLMScore] BLIP-2 unavailable ({e}). Trying InstructBLIP …")
+            print(f"[VLMScore] Qwen3-VL unavailable ({e}). Trying Qwen2-VL …")
 
-        # ── Try InstructBLIP fallback ────────────────────────────────────
+        # ── Try Qwen2-VL-7B-Instruct fallback ─────────────────────────────
         try:
-            from transformers import InstructBlipProcessor, InstructBlipForConditionalGeneration
-            fb = "Salesforce/instructblip-vicuna-7b"
-            print(f"[VLMScore] Loading InstructBLIP: {fb} …")
-            self._processor = InstructBlipProcessor.from_pretrained(fb)
-            self._model = InstructBlipForConditionalGeneration.from_pretrained(
-                fb,
-                torch_dtype=torch.float16 if "cuda" in self.device else torch.float32,
-                device_map=self.device,
+            from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+            fb_model = "Qwen/Qwen2-VL-7B-Instruct"
+            print(f"[VLMScore] Loading Qwen2-VL: {fb_model} …")
+            
+            self._processor = AutoProcessor.from_pretrained(
+                fb_model, 
+                trust_remote_code=True
             )
+            self._processor.tokenizer.padding_side = "left"
+            
+            self._model = Qwen2VLForConditionalGeneration.from_pretrained(
+                fb_model,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                device_map=None,
+                trust_remote_code=True,
+            )
+            self._model.to(self.device)
             self._model.eval()
-            self._backend = "instructblip"
-            print("[VLMScore] InstructBLIP loaded.")
+            self._backend = "qwen2vl"
+            print(f"[VLMScore] Qwen2-VL loaded ✓ (flash_attention_2)")
             return
         except Exception as e:
-            print(f"[VLMScore] InstructBLIP unavailable ({e}). Using stub.")
+            print(f"[VLMScore] Qwen2-VL unavailable ({e}). Using stub.")
 
         self._backend = "stub"
+        print("[VLMScore] WARNING: No VLM loaded. Using stub mode (neutral scores).")
 
-    # ── Internal VLM evaluation ──────────────────────────────────────────── #
+    # ── Image preprocessing ──────────────────────────────────────────────── #
+
+    def _prepare_image(self, img: torch.Tensor) -> Image.Image:
+        """Convert tensor to PIL Image and resize."""
+        if img.dim() == 4:
+            img = img[0]  # Remove batch dimension
+        pil_img = TF.to_pil_image(img.clamp(0, 1).cpu())
+        return pil_img.resize((self.image_size, self.image_size), Image.LANCZOS)
+
+    # ── Build conversation for Qwen VL ───────────────────────────────────── #
+
+    def _build_conversation(
+        self,
+        person_img: Image.Image,
+        cloth_img: Image.Image,
+        tryon_img: Image.Image,
+    ) -> List[Dict]:
+        """
+        Build the conversation format for Qwen3-VL.
+        
+        Format follows the reference implementation with system prompt
+        and user message containing 3 images.
+        """
+        messages = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": _SYSTEM_PROMPT}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Image A (Person Ground Truth):"},
+                    {"type": "image", "image": person_img},
+                    {"type": "text", "text": "\nImage B (Garment Ground Truth):"},
+                    {"type": "image", "image": cloth_img},
+                    {"type": "text", "text": "\nImage C (Try-On Result):"},
+                    {"type": "image", "image": tryon_img},
+                    {"type": "text", "text": "\nEvaluate this try-on result against the garment ground truth and identity ground truth. Return JSON with score and reason."},
+                ],
+            },
+        ]
+        return messages
+
+    # ── Single evaluation ────────────────────────────────────────────────── #
 
     @torch.no_grad()
-    def _evaluate_images(self, pil_images: List[Image.Image]) -> List[Dict[str, any]]:
+    def _evaluate_single(
+        self,
+        person_img: Image.Image,
+        cloth_img: Image.Image,
+        tryon_img: Image.Image,
+    ) -> Dict[str, any]:
         """
-        Run the comprehensive evaluation prompt on a batch of PIL images.
+        Evaluate a single triplet of images.
         
         Returns:
-            List of dicts with 'vlm_score' (float 0-1) and 'reason' (str)
+            Dict with 'vlm_score' (float 0-1) and 'reason' (str)
         """
         if self._backend == "stub":
-            return [{"vlm_score": self.neutral, "reason": "VLM stub mode"} for _ in pil_images]
+            return {"vlm_score": self.neutral, "reason": "VLM stub mode"}
 
-        results = []
-        
         try:
-            # Construct the full prompt with system context
-            full_prompt = f"{_SYSTEM_PROMPT}\n\n{_EVAL_PROMPT}"
+            # Build conversation
+            messages = self._build_conversation(person_img, cloth_img, tryon_img)
             
-            inputs = self._processor(
-                images=pil_images,
-                text=[full_prompt] * len(pil_images),
+            # Apply chat template
+            encoded = self._processor.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
                 return_tensors="pt",
-                padding=True,
-            ).to(self.device)
-
-            generated = self._model.generate(
-                **inputs,
-                max_new_tokens=150,  # Allow enough tokens for JSON response
+            )
+            
+            # Move to device
+            input_ids = encoded["input_ids"].to(self.device)
+            attention_mask = encoded["attention_mask"].to(self.device)
+            pixel_values = encoded["pixel_values"].to(self.device)
+            image_grid_thw = encoded["image_grid_thw"].to(self.device)
+            
+            # Generate
+            gen_ids = self._model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                pixel_values=pixel_values,
+                image_grid_thw=image_grid_thw,
+                max_new_tokens=self.max_new_tokens,
+                use_cache=True,
                 do_sample=False,
             )
-            texts = self._processor.batch_decode(generated, skip_special_tokens=True)
             
-            for text in texts:
-                result = _parse_vlm_response(text, self.neutral)
-                results.append(result)
+            # Decode response (only new tokens)
+            input_len = input_ids.shape[1]
+            response = self._processor.tokenizer.decode(
+                gen_ids[0, input_len:], 
+                skip_special_tokens=True
+            )
+            
+            # Parse JSON response
+            result = _parse_vlm_response(response.strip(), self.neutral)
+            
+            # Print score to console
+            print(f"[VLMScore] score={result['vlm_score']:.3f} | reason={result['reason'][:80]}...")
+            
+            return result
 
+        except torch.cuda.OutOfMemoryError:
+            print("[VLMScore] CUDA OOM — clearing cache and returning neutral score")
+            torch.cuda.empty_cache()
+            gc.collect()
+            return {"vlm_score": self.neutral, "reason": "CUDA OOM"}
+        
         except Exception as e:
-            print(f"[VLMScore] Inference error ({e}). Using neutral score.")
-            results = [{"vlm_score": self.neutral, "reason": f"Inference error: {e}"} for _ in pil_images]
-
-        return results
+            print(f"[VLMScore] Inference error: {e}")
+            return {"vlm_score": self.neutral, "reason": f"Inference error: {str(e)[:50]}"}
 
     # ── Public batch scoring ─────────────────────────────────────────────── #
 
@@ -320,9 +445,9 @@ class VLMScoreMetric:
         pred : torch.Tensor  (B, 3, H, W) float32 in [0, 1]
             The generated try-on images to evaluate.
         person_images : torch.Tensor, optional  (B, 3, H, W)
-            Original person images (for context, not directly used in prompt).
+            Original person images (identity ground truth).
         cloth_images : torch.Tensor, optional  (B, 3, H, W)
-            Original cloth images (for context, not directly used in prompt).
+            Original cloth images (garment ground truth).
 
         Returns
         -------
@@ -334,15 +459,31 @@ class VLMScoreMetric:
             }
         """
         B = pred.shape[0]
-        pil_list = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in pred]
-
-        # Process in batches
         results: List[Dict[str, any]] = []
-        for start in range(0, B, self.vlm_batch):
-            chunk = pil_list[start: start + self.vlm_batch]
-            chunk_results = self._evaluate_images(chunk)
-            results.extend(chunk_results)
-
+        
+        for i in range(B):
+            # Prepare images
+            tryon_pil = self._prepare_image(pred[i])
+            
+            # Use provided images or create dummy black images
+            if person_images is not None:
+                person_pil = self._prepare_image(person_images[i])
+            else:
+                person_pil = Image.new("RGB", (self.image_size, self.image_size), (0, 0, 0))
+            
+            if cloth_images is not None:
+                cloth_pil = self._prepare_image(cloth_images[i])
+            else:
+                cloth_pil = Image.new("RGB", (self.image_size, self.image_size), (0, 0, 0))
+            
+            # Evaluate
+            result = self._evaluate_single(person_pil, cloth_pil, tryon_pil)
+            results.append(result)
+            
+            # Clear cache periodically
+            if (i + 1) % 10 == 0:
+                torch.cuda.empty_cache()
+        
         return results
 
     def compute_batch_scalar(self, pred: torch.Tensor) -> List[float]:
@@ -358,6 +499,7 @@ class VLMScoreMetric:
     def describe(self) -> str:
         lines = [
             f"VLMScoreMetric  backend={self._backend}",
+            f"  Model: Qwen3-VL (multi-image evaluation)",
             f"  Evaluation Criteria:",
             f"    1. Photorealism (texture, wrinkles, shading)",
             f"    2. Lighting Consistency (shadows, highlights)",

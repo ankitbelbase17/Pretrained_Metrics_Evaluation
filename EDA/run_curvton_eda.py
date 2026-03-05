@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
+import torch
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -49,6 +50,7 @@ from EDA.plots.p4_illumination_eda import plot_luminance_spectrum, plot_illumina
 from EDA.plots.p5_body_shape_eda import plot_shape_pca, plot_shape_coefficient_histograms
 from EDA.plots.p6_appearance_eda import plot_face_umap, plot_pairwise_distance_distribution
 from EDA.plots.p7_garment_eda import plot_garment_umap, plot_eigenvalue_spectrum
+from EDA.plots.p11_clip_embedding_eda import run_clip_embedding_eda
 
 apply_paper_style()
 
@@ -274,12 +276,25 @@ def run_curvton_eda(
         plot_pairwise_distance_distribution(face_data, str(out_path / "appearance"))
     
     # --- 7. Garment EDA ---
-    print("\n[7/7] Garment Diversity...")
+    print("\n[7/8] Garment Diversity...")
     garment_data = {k: v["garment_embs"] for k, v in all_features.items() if len(v.get("garment_embs", [])) > 0}
     
     if garment_data:
         plot_garment_umap(garment_data, str(out_path / "garment"))
         plot_eigenvalue_spectrum(garment_data, str(out_path / "garment"))
+    
+    # --- 8. CLIP Embedding EDA (Image + Text) ---
+    print("\n[8/8] CLIP Embedding Analysis (20% sample)...")
+    # Run CLIP embedding EDA at 20% sample ratio for efficiency
+    clip_sample_ratio = min(sample_ratio, 0.2)  # Cap at 20% for CLIP analysis
+    run_clip_embedding_eda(
+        base_path=base_path,
+        out_dir=str(out_path / "clip_embeddings"),
+        cache_dir=str(cache_path.parent / "clip"),
+        sample_ratio=clip_sample_ratio,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        force_recompute=force_recompute,
+    )
     
     print("\n" + "=" * 70)
     print(f"EDA Complete! Figures saved to: {out_path}")
