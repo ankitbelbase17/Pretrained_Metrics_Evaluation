@@ -11,13 +11,15 @@ Input: person_image + cloth_image + tryon_image (ALL THREE)
 The VLM analyzes the try-on result in context of what the input person
 and garment looked like to assess plausibility.
 
-Sub-scores (1-10 scale, higher = better):
+Sub-scores (continuous 0-1 scale, higher = better):
   S1: Garment Fidelity (texture, colour, pattern preservation vs cloth_image)
   S2: Geometric Naturalness (fabric draping, folding)
   S3: Identity & Body Preservation (face, pose, proportions vs person_image)
   S4: Scene Coherence (lighting, shadows, background integration)
 
 Final Score: VLM_score = 0.30*S1 + 0.25*S2 + 0.25*S3 + 0.20*S4
+
+All scores are normalized to [0, 1] continuous range.
 """
 
 from __future__ import annotations
@@ -83,8 +85,19 @@ class VLMEvaluator:
             person_images=person_images,
             cloth_images=cloth_images,
         )
-        self._results.extend(results)
-        return results
+        # Normalize scores from [1, 10] to [0, 1] continuous range
+        normalized_results = []
+        for r in results:
+            norm_r = {
+                "s1": (r["s1"] - 1.0) / 9.0,  # Map [1, 10] -> [0, 1]
+                "s2": (r["s2"] - 1.0) / 9.0,
+                "s3": (r["s3"] - 1.0) / 9.0,
+                "s4": (r["s4"] - 1.0) / 9.0,
+                "vlm_score": (r["vlm_score"] - 1.0) / 9.0,
+            }
+            normalized_results.append(norm_r)
+        self._results.extend(normalized_results)
+        return normalized_results
     
     def evaluate_single(
         self,

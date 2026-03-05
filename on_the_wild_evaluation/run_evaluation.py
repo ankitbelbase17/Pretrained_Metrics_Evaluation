@@ -5,12 +5,12 @@ Unified In-the-Wild Evaluation Runner with Triplet Dataloader
 
 Runs all in-the-wild metrics on triplets of (person, cloth, tryon) images.
 
-Metric → Input Mapping:
-───────────────────────
-  - VLM Score           : person + cloth + tryon (ALL THREE)
+Metric → Input Mapping & Output Range:
+──────────────────────────────────────
+  - VLM Score           : person + cloth + tryon (ALL THREE) → [0, 1] continuous
   - Pose Consistency    : person + tryon (pose preservation)
-  - NIQE                : tryon ONLY (no-reference quality)
-  - MUSIQ               : tryon ONLY (no-reference quality)
+  - NIQE                : tryon ONLY (no-reference quality) → lower is better
+  - MUSIQ               : tryon ONLY (no-reference quality) → higher is better
   - JEPA                : tryon ONLY (self-consistency)
   - CLIP Garment        : cloth + tryon (garment fidelity)
 
@@ -146,10 +146,10 @@ class WildEvaluationSuite:
         print(f"  Device: {device}")
         print(f"  Metrics: {', '.join(self.metrics)}")
         print()
-        print("  Metric → Input Mapping:")
+        print("  Metric → Input Mapping & Output Range:")
         print("  ─────────────────────────────────────────────────────────────")
         if "vlm" in self.metrics:
-            print("    VLM Score        : person + cloth + tryon (ALL THREE)")
+            print("    VLM Score        : person + cloth + tryon → [0, 1] continuous")
         if "pose" in self.metrics:
             print("    Pose Consistency : person + tryon")
         if "clip" in self.metrics:
@@ -157,9 +157,9 @@ class WildEvaluationSuite:
         if "jepa" in self.metrics:
             print("    JEPA             : tryon ONLY")
         if "niqe" in self.metrics:
-            print("    NIQE             : tryon ONLY")
+            print("    NIQE             : tryon ONLY (lower = better)")
         if "musiq" in self.metrics:
-            print("    MUSIQ            : tryon ONLY")
+            print("    MUSIQ            : tryon ONLY (higher = better)")
         print("=" * 70 + "\n")
         
         # Initialize evaluators
