@@ -12,7 +12,7 @@ Supports:
 Usage:
     # Single ratio
     python pretrained_metrics/compute_curvton_metrics.py \
-        --base_path /path/to/dataset_ultimate \
+        --base_path ../dataset_v3/dataset_ultimate \
         --out_dir metrics_output/curvton \
         --sample_ratio 1.0
 
@@ -87,7 +87,7 @@ def compute_metrics_for_split(
     pose_m     = PoseMetrics(device=device)
     occ_m      = OcclusionMetrics(device=device)
     bg_m       = BackgroundMetrics(device=device)
-    illum_m    = IlluminationMetrics(device=device)
+    illum_m    = IlluminationMetrics()
     shape_m    = BodyShapeMetrics(device=device)
     appear_m   = AppearanceMetrics(device=device)
     garment_m  = GarmentTextureMetrics(device=device)
