@@ -37,104 +37,134 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 import numpy as np
+import torch
+import torchvision.transforms as T
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dataloaders.curvton_dataloader import CURVTONDataloader
 
-# Import metric modules
-from pretrained_metrics.metrics.m1_pose import compute_pose_error
-from pretrained_metrics.metrics.m2_occlusion import compute_occlusion_ratio
-from pretrained_metrics.metrics.m3_background import compute_background_complexity
-from pretrained_metrics.metrics.m4_illumination import compute_illumination_consistency
-from pretrained_metrics.metrics.m5_body_shape import compute_body_shape_preservation
-from pretrained_metrics.metrics.m6_appearance import compute_appearance_diversity
-from pretrained_metrics.metrics.m7_garment_texture import compute_garment_texture_fidelity
-from pretrained_metrics.metrics.unified_index import compute_unified_index
+# Import class-based metric modules
+from pretrained_metrics.metrics.m1_pose import PoseMetrics
+from pretrained_metrics.metrics.m2_occlusion import OcclusionMetrics
+from pretrained_metrics.metrics.m3_background import BackgroundMetrics
+from pretrained_metrics.metrics.m4_illumination import IlluminationMetrics
+from pretrained_metrics.metrics.m5_body_shape import BodyShapeMetrics
+from pretrained_metrics.metrics.m6_appearance import AppearanceMetrics
+from pretrained_metrics.metrics.m7_garment_texture import GarmentTextureMetrics
+from pretrained_metrics.metrics.unified_index import UnifiedComplexityIndex
+
+# ── Image → tensor helper ────────────────────────────────────────────────────
+_TO_TENSOR = T.Compose([T.Resize((512, 384)), T.ToTensor()])
+
+
+def _load_image_tensor(path: str) -> torch.Tensor:
+    """Load an image and return a (3, H, W) float32 tensor in [0, 1]."""
+    return _TO_TENSOR(Image.open(path).convert("RGB"))
 
 
 def compute_metrics_for_split(
     loader: CURVTONDataloader,
     split_name: str,
+    device: str = "cpu",
+    batch_size: int = 16,
     verbose: bool = True,
 ) -> Dict[str, float]:
     """
     Compute all pretrained metrics for a CURVTON split.
-    
+
+    Uses the class-based metric API: instantiate → .update(batch) → .compute().
+
     Returns
     -------
-    Dict with metric names as keys and mean values
+    Dict with metric names as keys and aggregated values.
     """
     if verbose:
         print(f"\n  Computing metrics for {split_name} ({len(loader)} samples)...")
-    
-    # Collect per-sample metrics
-    metrics_per_sample = {
-        "pose_error": [],
-        "occlusion_ratio": [],
-        "bg_complexity": [],
-        "illumination_consistency": [],
-        "body_shape_preservation": [],
-        "appearance_diversity": [],
-        "garment_texture_fidelity": [],
-    }
-    
-    for i, (person_path, cloth_path, tryon_path, meta) in enumerate(loader):
-        if verbose and i % 200 == 0:
+
+    # ── Instantiate metric objects ────────────────────────────────────────
+    pose_m     = PoseMetrics(device=device)
+    occ_m      = OcclusionMetrics(device=device)
+    bg_m       = BackgroundMetrics(device=device)
+    illum_m    = IlluminationMetrics(device=device)
+    shape_m    = BodyShapeMetrics(device=device)
+    appear_m   = AppearanceMetrics(device=device)
+    garment_m  = GarmentTextureMetrics(device=device)
+
+    # ── Batch accumulation ────────────────────────────────────────────────
+    person_buf: List[torch.Tensor] = []
+    cloth_buf:  List[torch.Tensor] = []
+    n_processed = 0
+
+    def _flush():
+        nonlocal person_buf, cloth_buf
+        if not person_buf:
+            return
+        person_batch = torch.stack(person_buf)   # (B, 3, H, W)
+        cloth_batch  = torch.stack(cloth_buf)    # (B, 3, H, W)
+
+        pose_m.update(person_batch)
+        occ_m.update(person_batch)
+        bg_m.update(person_batch)
+        illum_m.update(person_batch)
+        shape_m.update(person_batch)
+        appear_m.update(person_batch)
+        garment_m.update(cloth_batch)
+
+        person_buf = []
+        cloth_buf  = []
+
+    for i, (person_img, cloth_img, _tryon_img, _meta) in enumerate(loader):
+        if verbose and i % 500 == 0:
             print(f"    Processing {i}/{len(loader)}...")
-        
+
         try:
-            # M1: Pose Error
-            pose_err = compute_pose_error(person_path, tryon_path)
-            if pose_err is not None:
-                metrics_per_sample["pose_error"].append(pose_err)
-            
-            # M2: Occlusion Ratio
-            occ = compute_occlusion_ratio(person_path, cloth_path)
-            if occ is not None:
-                metrics_per_sample["occlusion_ratio"].append(occ)
-            
-            # M3: Background Complexity
-            bg = compute_background_complexity(person_path)
-            if bg is not None:
-                metrics_per_sample["bg_complexity"].append(bg)
-            
-            # M4: Illumination Consistency
-            illum = compute_illumination_consistency(person_path, tryon_path)
-            if illum is not None:
-                metrics_per_sample["illumination_consistency"].append(illum)
-            
-            # M5: Body Shape Preservation
-            shape = compute_body_shape_preservation(person_path, tryon_path)
-            if shape is not None:
-                metrics_per_sample["body_shape_preservation"].append(shape)
-            
-            # M6: Appearance Diversity (computed at dataset level, placeholder here)
-            # This will be computed separately
-            
-            # M7: Garment Texture Fidelity
-            texture = compute_garment_texture_fidelity(cloth_path, tryon_path)
-            if texture is not None:
-                metrics_per_sample["garment_texture_fidelity"].append(texture)
-                
+            if loader.return_paths:
+                person_t = _load_image_tensor(person_img)
+                cloth_t  = _load_image_tensor(cloth_img)
+            else:
+                # PIL images
+                person_t = _TO_TENSOR(person_img)
+                cloth_t  = _TO_TENSOR(cloth_img)
+
+            person_buf.append(person_t)
+            cloth_buf.append(cloth_t)
+            n_processed += 1
+
+            if len(person_buf) >= batch_size:
+                _flush()
+
         except Exception as e:
             if verbose:
-                print(f"    Error at {i}: {e}")
+                print(f"    Error at sample {i}: {e}")
             continue
-    
-    # Compute mean metrics
-    results = {}
-    for metric_name, values in metrics_per_sample.items():
-        if values:
-            results[metric_name] = float(np.mean(values))
-            results[f"{metric_name}_std"] = float(np.std(values))
-            results[f"{metric_name}_n"] = len(values)
-        else:
-            results[metric_name] = None
-    
-    # Compute unified index
-    results["unified_index"] = compute_unified_index(results)
-    
+
+    _flush()  # final partial batch
+
+    if verbose:
+        print(f"    Processed {n_processed} samples successfully.")
+
+    # ── Aggregate ─────────────────────────────────────────────────────────
+    results: Dict[str, float] = {}
+    for label, metric_obj in [
+        ("pose",     pose_m),
+        ("occlusion", occ_m),
+        ("background", bg_m),
+        ("illumination", illum_m),
+        ("body_shape", shape_m),
+        ("appearance", appear_m),
+        ("garment_texture", garment_m),
+    ]:
+        try:
+            sub = metric_obj.compute()
+            for k, v in sub.items():
+                results[k] = v
+        except Exception as e:
+            if verbose:
+                print(f"    Warning: {label} metric compute() failed: {e}")
+
+    results["n_samples"] = n_processed
     return results
 
 
@@ -143,6 +173,8 @@ def compute_curvton_metrics(
     out_dir: str = "metrics_output/curvton",
     sample_ratio: float = 1.0,
     difficulties: List[str] = ["easy", "medium", "hard"],
+    device: str = "cpu",
+    batch_size: int = 16,
     seed: int = 42,
 ) -> Dict[str, Dict]:
     """
@@ -160,6 +192,7 @@ def compute_curvton_metrics(
     print(f"  Output:       {out_dir}")
     print(f"  Sample ratio: {sample_ratio:.0%}")
     print(f"  Difficulties: {difficulties}")
+    print(f"  Device:       {device}")
     print("=" * 70)
     
     all_results = {}
@@ -176,36 +209,26 @@ def compute_curvton_metrics(
             return_paths=True,
         )
         
-        metrics = compute_metrics_for_split(loader, diff)
+        metrics = compute_metrics_for_split(
+            loader, diff, device=device, batch_size=batch_size,
+        )
         all_results[diff] = metrics
         sample_counts[diff] = len(loader)
     
-    # Compute combined metrics (weighted average by sample count)
-    print("\n[COMBINED] Computing weighted average...")
-    total_samples = sum(sample_counts.values())
-    combined_metrics = {}
-    
-    metric_names = [
-        "pose_error", "occlusion_ratio", "bg_complexity",
-        "illumination_consistency", "body_shape_preservation",
-        "garment_texture_fidelity"
-    ]
-    
-    for metric in metric_names:
-        weighted_sum = 0
-        valid_samples = 0
-        
-        for diff in difficulties:
-            if all_results[diff].get(metric) is not None:
-                weight = sample_counts[diff]
-                weighted_sum += all_results[diff][metric] * weight
-                valid_samples += weight
-        
-        if valid_samples > 0:
-            combined_metrics[metric] = weighted_sum / valid_samples
-    
-    combined_metrics["unified_index"] = compute_unified_index(combined_metrics)
-    all_results["combined"] = combined_metrics
+    # ── Unified Complexity Index ──────────────────────────────────────────
+    uci = UnifiedComplexityIndex()
+    for diff in difficulties:
+        uci.add_dataset(f"CURVTON-{diff}", all_results[diff])
+
+    # Combined: merge all difficulty metrics into one pass
+    # (re-run on full dataset or just report per-difficulty)
+    uci_scores = uci.compute_scores()
+
+    # Attach unified scores to results
+    for entry in uci_scores:
+        diff_key = entry["dataset"].split("-")[-1].lower()
+        if diff_key in all_results:
+            all_results[diff_key]["unified_score"] = entry["unified_score"]
     
     # Add metadata
     output = {
@@ -214,38 +237,21 @@ def compute_curvton_metrics(
         "sample_ratio": sample_ratio,
         "timestamp": datetime.now().isoformat(),
         "sample_counts": sample_counts,
-        "total_samples": total_samples,
+        "total_samples": sum(sample_counts.values()),
         "metrics": all_results,
+        "unified_index_report": uci_scores,
     }
     
     # Save results
     ratio_pct = int(sample_ratio * 100)
     output_file = out_path / f"curvton_metrics_{ratio_pct}pct.json"
     with open(output_file, "w") as f:
-        json.dump(output, f, indent=2)
+        json.dump(output, f, indent=2, default=str)
     
     print(f"\n  Saved metrics to {output_file}")
     
     # Print summary
-    print("\n" + "=" * 70)
-    print("METRICS SUMMARY")
-    print("=" * 70)
-    
-    header = f"{'Metric':<30} {'Easy':>10} {'Medium':>10} {'Hard':>10} {'Combined':>10}"
-    print(header)
-    print("-" * len(header))
-    
-    for metric in metric_names + ["unified_index"]:
-        row = f"{metric:<30}"
-        for diff in difficulties + ["combined"]:
-            val = all_results[diff].get(metric)
-            if val is not None:
-                row += f" {val:>9.4f}"
-            else:
-                row += f" {'N/A':>9}"
-        print(row)
-    
-    print("=" * 70)
+    uci.print_report(uci_scores)
     
     return all_results
 
@@ -254,6 +260,8 @@ def compute_multi_ratio_metrics(
     base_path: str,
     out_dir: str = "metrics_output/curvton",
     ratios: List[float] = [0.1, 0.2, 0.3, 0.4, 0.5, 1.0],
+    device: str = "cpu",
+    batch_size: int = 16,
 ) -> Dict[str, Dict]:
     """
     Compute metrics for multiple sample ratios.
@@ -270,6 +278,8 @@ def compute_multi_ratio_metrics(
             base_path=base_path,
             out_dir=out_dir,
             sample_ratio=ratio,
+            device=device,
+            batch_size=batch_size,
         )
         all_ratio_results[f"{ratio_pct}%"] = results
     
@@ -314,6 +324,14 @@ if __name__ == "__main__":
         "--difficulties", type=str, nargs="+", default=["easy", "medium", "hard"],
         help="Difficulty levels to process"
     )
+    parser.add_argument(
+        "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device for metric computation"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=16,
+        help="Batch size for metric computation"
+    )
     
     args = parser.parse_args()
     
@@ -321,6 +339,8 @@ if __name__ == "__main__":
         compute_multi_ratio_metrics(
             base_path=args.base_path,
             out_dir=args.out_dir,
+            device=args.device,
+            batch_size=args.batch_size,
         )
     else:
         compute_curvton_metrics(
@@ -328,4 +348,6 @@ if __name__ == "__main__":
             out_dir=args.out_dir,
             sample_ratio=args.sample_ratio,
             difficulties=args.difficulties,
+            device=args.device,
+            batch_size=args.batch_size,
         )
