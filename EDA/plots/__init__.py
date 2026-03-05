@@ -4,24 +4,37 @@ EDA/plots/__init__.py
 Export all EDA plot functions.
 """
 
-from .p1_pose_eda import run_pose_eda
-from .p2_occlusion_eda import run_occlusion_eda
-from .p3_background_eda import run_background_eda
-from .p4_illumination_eda import run_illumination_eda
-from .p5_body_shape_eda import run_body_shape_eda
-from .p6_appearance_eda import run_appearance_eda
-from .p7_garment_eda import run_garment_eda
-from .p8_meta_correlation import run_meta_correlation_eda
-from .p10_camera_angle_eda import run_camera_angle_eda
+from .p1_pose_eda import plot_pose_umap, plot_joint_angle_distributions
+from .p2_occlusion_eda import plot_occlusion_histogram, plot_occlusion_heatmap
+from .p3_background_eda import plot_bg_entropy_histogram, plot_entropy_vs_objects
+from .p4_illumination_eda import plot_luminance_spectrum, plot_illumination_pca
+from .p5_body_shape_eda import plot_shape_pca, plot_shape_coefficient_histograms
+from .p6_appearance_eda import plot_face_umap, plot_pairwise_distance_distribution
+from .p7_garment_eda import plot_garment_umap, plot_eigenvalue_spectrum
+from .p11_clip_embedding_eda import run_clip_embedding_eda
 
 __all__ = [
-    "run_pose_eda",
-    "run_occlusion_eda",
-    "run_background_eda",
-    "run_illumination_eda",
-    "run_body_shape_eda",
-    "run_appearance_eda",
-    "run_garment_eda",
-    "run_meta_correlation_eda",
-    "run_camera_angle_eda",
+    # Pose EDA
+    "plot_pose_umap",
+    "plot_joint_angle_distributions",
+    # Occlusion EDA
+    "plot_occlusion_histogram",
+    "plot_occlusion_heatmap",
+    # Background EDA
+    "plot_bg_entropy_histogram",
+    "plot_entropy_vs_objects",
+    # Illumination EDA
+    "plot_luminance_spectrum",
+    "plot_illumination_pca",
+    # Body Shape EDA
+    "plot_shape_pca",
+    "plot_shape_coefficient_histograms",
+    # Appearance EDA
+    "plot_face_umap",
+    "plot_pairwise_distance_distribution",
+    # Garment EDA
+    "plot_garment_umap",
+    "plot_eigenvalue_spectrum",
+    # CLIP Embedding EDA
+    "run_clip_embedding_eda",
 ]
