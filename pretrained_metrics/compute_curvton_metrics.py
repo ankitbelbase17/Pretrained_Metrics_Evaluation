@@ -64,6 +64,65 @@ def _load_image_tensor(path: str) -> torch.Tensor:
     return _TO_TENSOR(Image.open(path).convert("RGB"))
 
 
+def _iterate_loader(loader, verbose=False):
+    """Yield (person_tensor, cloth_tensor) from loader, skipping failures."""
+    for i, (person_img, cloth_img, _tryon_img, _meta) in enumerate(loader):
+        if verbose and i % 500 == 0:
+            print(f"    Processing {i}/{len(loader)}...")
+        try:
+            if loader.return_paths:
+                yield _load_image_tensor(person_img), _load_image_tensor(cloth_img)
+            else:
+                yield _TO_TENSOR(person_img), _TO_TENSOR(cloth_img)
+        except Exception as e:
+            if verbose:
+                print(f"    Error at sample {i}: {e}")
+            continue
+
+
+def _run_single_metric(label, metric_cls, metric_kwargs, loader,
+                       use_cloth, batch_size, device, verbose):
+    """
+    Instantiate one metric, iterate the full loader, compute, then free
+    the metric (and its models) before returning results.
+
+    Only one heavy model is resident in GPU at a time.
+    """
+    if verbose:
+        print(f"\n    [{label}] Loading model ...")
+
+    metric_obj = metric_cls(**metric_kwargs)
+
+    buf: List[torch.Tensor] = []
+    n = 0
+
+    def _flush():
+        nonlocal buf
+        if not buf:
+            return
+        batch = torch.stack(buf)
+        metric_obj.update(batch)
+        buf = []
+
+    for person_t, cloth_t in _iterate_loader(loader, verbose=verbose):
+        buf.append(cloth_t if use_cloth else person_t)
+        n += 1
+        if len(buf) >= batch_size:
+            _flush()
+    _flush()
+
+    sub = metric_obj.compute()
+    if verbose:
+        print(f"    [{label}] Done ({n} samples). Keys: {list(sub.keys())}")
+
+    # ── Free GPU memory ──────────────────────────────────────────────────
+    del metric_obj
+    if device != "cpu" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return sub, n
+
+
 def compute_metrics_for_split(
     loader: CURVTONDataloader,
     split_name: str,
@@ -74,7 +133,8 @@ def compute_metrics_for_split(
     """
     Compute all pretrained metrics for a CURVTON split.
 
-    Uses the class-based metric API: instantiate → .update(batch) → .compute().
+    Metrics are computed **sequentially** so that only one heavy model is
+    loaded into GPU memory at a time, preventing OOM on large datasets.
 
     Returns
     -------
@@ -83,86 +143,38 @@ def compute_metrics_for_split(
     if verbose:
         print(f"\n  Computing metrics for {split_name} ({len(loader)} samples)...")
 
-    # ── Instantiate metric objects ────────────────────────────────────────
-    pose_m     = PoseMetrics(device=device)
-    occ_m      = OcclusionMetrics(device=device)
-    bg_m       = BackgroundMetrics(device=device)
-    illum_m    = IlluminationMetrics()
-    shape_m    = BodyShapeMetrics(device=device)
-    appear_m   = AppearanceMetrics(device=device)
-    garment_m  = GarmentTextureMetrics(device=device)
+    # (label, class, constructor kwargs, uses_cloth_images)
+    metric_specs = [
+        ("pose",            PoseMetrics,          {"device": device}, False),
+        ("occlusion",       OcclusionMetrics,     {"device": device}, False),
+        ("background",      BackgroundMetrics,    {"device": device}, False),
+        ("illumination",    IlluminationMetrics,  {},                 False),
+        ("body_shape",      BodyShapeMetrics,     {"device": device}, False),
+        ("appearance",      AppearanceMetrics,    {"device": device}, False),
+        ("garment_texture", GarmentTextureMetrics,{"device": device}, True),
+    ]
 
-    # ── Batch accumulation ────────────────────────────────────────────────
-    person_buf: List[torch.Tensor] = []
-    cloth_buf:  List[torch.Tensor] = []
+    results: Dict[str, float] = {}
     n_processed = 0
 
-    def _flush():
-        nonlocal person_buf, cloth_buf
-        if not person_buf:
-            return
-        person_batch = torch.stack(person_buf)   # (B, 3, H, W)
-        cloth_batch  = torch.stack(cloth_buf)    # (B, 3, H, W)
-
-        pose_m.update(person_batch)
-        occ_m.update(person_batch)
-        bg_m.update(person_batch)
-        illum_m.update(person_batch)
-        shape_m.update(person_batch)
-        appear_m.update(person_batch)
-        garment_m.update(cloth_batch)
-
-        person_buf = []
-        cloth_buf  = []
-
-    for i, (person_img, cloth_img, _tryon_img, _meta) in enumerate(loader):
-        if verbose and i % 500 == 0:
-            print(f"    Processing {i}/{len(loader)}...")
-
+    for label, cls, kwargs, use_cloth in metric_specs:
         try:
-            if loader.return_paths:
-                person_t = _load_image_tensor(person_img)
-                cloth_t  = _load_image_tensor(cloth_img)
-            else:
-                # PIL images
-                person_t = _TO_TENSOR(person_img)
-                cloth_t  = _TO_TENSOR(cloth_img)
-
-            person_buf.append(person_t)
-            cloth_buf.append(cloth_t)
-            n_processed += 1
-
-            if len(person_buf) >= batch_size:
-                _flush()
-
+            sub, n = _run_single_metric(
+                label, cls, kwargs, loader,
+                use_cloth=use_cloth,
+                batch_size=batch_size,
+                device=device,
+                verbose=verbose,
+            )
+            for k, v in sub.items():
+                results[k] = v
+            n_processed = max(n_processed, n)
         except Exception as e:
             if verbose:
-                print(f"    Error at sample {i}: {e}")
-            continue
-
-    _flush()  # final partial batch
+                print(f"    Warning: {label} metric failed: {e}")
 
     if verbose:
         print(f"    Processed {n_processed} samples successfully.")
-
-    # ── Aggregate ─────────────────────────────────────────────────────────
-    results: Dict[str, float] = {}
-    for label, metric_obj in [
-        ("pose",     pose_m),
-        ("occlusion", occ_m),
-        ("background", bg_m),
-        ("illumination", illum_m),
-        ("body_shape", shape_m),
-        ("appearance", appear_m),
-        ("garment_texture", garment_m),
-    ]:
-        try:
-            sub = metric_obj.compute()
-            for k, v in sub.items():
-                results[k] = v
-        except Exception as e:
-            if verbose:
-                print(f"    Warning: {label} metric compute() failed: {e}")
 
     results["n_samples"] = n_processed
     return results
