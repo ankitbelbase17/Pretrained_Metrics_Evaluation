@@ -9,10 +9,18 @@ Generates publication-quality EDA plots for CURVTON dataset:
 - Support for different sample ratios (10%, 20%, ..., 100%)
 
 Usage:
+    # Single GPU:
     python EDA/run_curvton_eda.py \
         --base_path /path/to/dataset_ultimate \
         --out_dir figures/curvton \
         --sample_ratio 1.0
+
+    # Multi-GPU (4 GPUs):
+    python EDA/run_curvton_eda.py \
+        --base_path /path/to/dataset_ultimate \
+        --out_dir figures/curvton \
+        --sample_ratio 1.0 \
+        --num_gpus 4
 
     # For test set:
     python EDA/run_curvton_eda.py \
@@ -25,6 +33,8 @@ from __future__ import annotations
 
 import argparse
 import gc
+import os
+import subprocess as _sp
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -111,20 +121,107 @@ def _load_image_tensor(path: str, tf) -> torch.Tensor:
     return tf(Image.open(path).convert("RGB"))
 
 
+# ── Module-level batch-processing (shared by single- & multi-GPU paths) ──────
+
+def _flush_batch_into(
+    extractor: "FeatureExtractor",
+    person_buf: List[torch.Tensor],
+    cloth_buf: List[torch.Tensor],
+    features: Dict[str, list],
+) -> None:
+    """Run all 7 metric backends on an accumulated mini-batch.
+
+    Appends results to *features* and clears the two buffers in-place.
+    """
+    if not person_buf:
+        return
+
+    import math as _math
+    from pretrained_metrics.metrics.m1_pose import (
+        _normalise_pose, _joint_angle, TRIPLET_IDX,
+    )
+    from pretrained_metrics.metrics.m3_background import _texture_entropy
+    from pretrained_metrics.metrics.m4_illumination import (
+        _rgb_to_lab_l, _sobel_gradient_variance,
+    )
+
+    person_t = torch.stack(person_buf)      # (B, 3, H, W)
+    cloth_t  = torch.stack(cloth_buf)
+    B = person_t.shape[0]
+
+    # M1 – Pose
+    kps_raw = extractor._kp_ext(person_t)
+    kps_norm, valid = _normalise_pose(kps_raw)
+    for i in range(B):
+        if valid[i]:
+            pn = kps_norm[i]
+            features["pose_vecs"].append(pn.flatten().astype(np.float32))
+            ang = [_joint_angle(pn[ia], pn[ib], pn[ic]) for ia, ib, ic in TRIPLET_IDX]
+            features["angles"].append(np.array(
+                [a if not _math.isnan(a) else 0.0 for a in ang], dtype=np.float32))
+        else:
+            features["pose_vecs"].append(np.zeros(34, dtype=np.float32))
+            features["angles"].append(np.zeros(len(TRIPLET_IDX), dtype=np.float32))
+
+    # M2 – Occlusion
+    seg = extractor._seg.segment(person_t)
+    G   = seg["garment"].float()
+    occ = ((seg["arms"].float() + seg["hair"].float() + seg["other"].float()) > 0).float()
+    overlap = G * occ
+    for i in range(B):
+        g_area = G[i].sum().item()
+        features["occlusion"].append(float(min(overlap[i].sum().item() / max(g_area, 1.0), 1.0)))
+
+    # M3 – Background
+    pmask  = extractor._per_seg(person_t)
+    obj_c  = extractor._obj_det.count_objects(person_t, pmask)
+    for i in range(B):
+        ent = _texture_entropy(person_t[i], pmask[i])
+        features["bg_entropy"].append(float(ent) if not _math.isnan(ent) else 0.0)
+        features["bg_obj_count"].append(int(obj_c[i]))
+
+    # M4 – Illumination
+    mean_L, L_maps = _rgb_to_lab_l(person_t.cpu())
+    for i in range(B):
+        features["lum_mean"].append(float(mean_L[i]))
+        features["lum_grad_var"].append(_sobel_gradient_variance(L_maps[i]))
+
+    # M5 – Body shape
+    b = extractor._shape_ex(person_t)
+    for bi in b:
+        features["betas"].append(bi.astype(np.float32))
+
+    # M6 – Appearance
+    f = extractor._face_ex(person_t)
+    for fi in f:
+        features["face_embs"].append(fi.astype(np.float32))
+
+    # M7 – Garment
+    g = extractor._garment_ex(cloth_t)
+    for gi in g:
+        features["garment_embs"].append(gi.astype(np.float32))
+
+    # free GPU memory
+    person_buf.clear()
+    cloth_buf.clear()
+    del person_t, cloth_t, seg, G, occ, overlap, pmask
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def extract_features_for_difficulty(
     loader: CURVTONDataloader,
-    extractor: FeatureExtractor,
+    extractor: Optional["FeatureExtractor"],
     cache_path: Path,
     force_recompute: bool = False,
     batch_size: int = _EXTRACT_BATCH_SIZE,
+    num_gpus: int = 1,
 ) -> Dict[str, np.ndarray]:
     """
     Extract EDA features for a CURVTON difficulty split.
 
-    Uses **batched** model inference (not per-image) so that GPU
-    utilisation is high and wall-clock time is reasonable.  Writes
-    intermediate checkpoints every ``_CHECKPOINT_EVERY`` images so
-    progress survives OOM / time-limit kills.
+    When *num_gpus* > 1 the work is automatically sharded across GPUs
+    via subprocesses (one per GPU, pinned with ``CUDA_VISIBLE_DEVICES``).
 
     Returns dict with keys: pose_vecs, angles, occlusion, bg_entropy,
                            lum_mean, betas, face_embs, garment_embs, etc.
@@ -135,6 +232,13 @@ def extract_features_for_difficulty(
         return dict(np.load(cache_path, allow_pickle=True))
 
     N = len(loader)
+
+    # ── multi-GPU path (subprocess-based) ─────────────────────────────
+    if num_gpus > 1 and N > num_gpus * batch_size:
+        print(f"  Multi-GPU extraction: {num_gpus} GPUs for {N} samples")
+        return _extract_multi_gpu(loader, cache_path, batch_size, num_gpus)
+
+    # ── single-GPU path ───────────────────────────────────────────────
     print(f"  Extracting features for {N} samples (batch_size={batch_size})...")
 
     # Check for partial checkpoint
@@ -158,79 +262,6 @@ def extract_features_for_difficulty(
     cloth_buf:  List[torch.Tensor] = []
     processed = start_idx
 
-    def _flush_batch():
-        """Run all 7 metric backends on the accumulated mini-batch."""
-        nonlocal person_buf, cloth_buf
-        if not person_buf:
-            return
-        import math as _math
-        from pretrained_metrics.metrics.m1_pose import _normalise_pose, _joint_angle, TRIPLET_IDX
-
-        person_t = torch.stack(person_buf)      # (B, 3, H, W)
-        cloth_t  = torch.stack(cloth_buf)
-        B = person_t.shape[0]
-
-        # M1 – Pose
-        kps_raw = extractor._kp_ext(person_t)
-        kps_norm, valid = _normalise_pose(kps_raw)
-        for i in range(B):
-            if valid[i]:
-                pn = kps_norm[i]
-                features["pose_vecs"].append(pn.flatten().astype(np.float32))
-                ang = [_joint_angle(pn[ia], pn[ib], pn[ic]) for ia, ib, ic in TRIPLET_IDX]
-                features["angles"].append(np.array(
-                    [a if not _math.isnan(a) else 0.0 for a in ang], dtype=np.float32))
-            else:
-                features["pose_vecs"].append(np.zeros(34, dtype=np.float32))
-                features["angles"].append(np.zeros(len(TRIPLET_IDX), dtype=np.float32))
-
-        # M2 – Occlusion
-        seg = extractor._seg.segment(person_t)
-        G   = seg["garment"].float()
-        occ = ((seg["arms"].float() + seg["hair"].float() + seg["other"].float()) > 0).float()
-        overlap = G * occ
-        for i in range(B):
-            g_area = G[i].sum().item()
-            features["occlusion"].append(float(min(overlap[i].sum().item() / max(g_area, 1.0), 1.0)))
-
-        # M3 – Background
-        from pretrained_metrics.metrics.m3_background import _texture_entropy
-        pmask  = extractor._per_seg(person_t)
-        obj_c  = extractor._obj_det.count_objects(person_t, pmask)
-        for i in range(B):
-            ent = _texture_entropy(person_t[i], pmask[i])
-            features["bg_entropy"].append(float(ent) if not _math.isnan(ent) else 0.0)
-            features["bg_obj_count"].append(int(obj_c[i]))
-
-        # M4 – Illumination
-        from pretrained_metrics.metrics.m4_illumination import _rgb_to_lab_l, _sobel_gradient_variance
-        mean_L, L_maps = _rgb_to_lab_l(person_t.cpu())
-        for i in range(B):
-            features["lum_mean"].append(float(mean_L[i]))
-            features["lum_grad_var"].append(_sobel_gradient_variance(L_maps[i]))
-
-        # M5 – Body shape
-        b = extractor._shape_ex(person_t)
-        for bi in b:
-            features["betas"].append(bi.astype(np.float32))
-
-        # M6 – Appearance
-        f = extractor._face_ex(person_t)
-        for fi in f:
-            features["face_embs"].append(fi.astype(np.float32))
-
-        # M7 – Garment
-        g = extractor._garment_ex(cloth_t)
-        for gi in g:
-            features["garment_embs"].append(gi.astype(np.float32))
-
-        # free GPU memory
-        person_buf.clear()
-        cloth_buf.clear()
-        del person_t, cloth_t, seg, G, occ, overlap, pmask
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
     # ── main loop ─────────────────────────────────────────────────────
     for i, (person_path, cloth_path, _tryon_path, _meta) in enumerate(loader):
         if i < start_idx:
@@ -244,7 +275,7 @@ def extract_features_for_difficulty(
             continue
 
         if len(person_buf) >= batch_size:
-            _flush_batch()
+            _flush_batch_into(extractor, person_buf, cloth_buf, features)
 
         processed = i + 1
 
@@ -255,7 +286,7 @@ def extract_features_for_difficulty(
             _save_checkpoint(features, processed, ckpt_path)
             gc.collect()
 
-    _flush_batch()  # final partial batch
+    _flush_batch_into(extractor, person_buf, cloth_buf, features)  # final partial batch
 
     # ── convert to arrays & save final cache ──────────────────────────
     result: Dict[str, np.ndarray] = {}
@@ -291,6 +322,178 @@ def _save_checkpoint(features: dict, next_idx: int, path: Path):
     print(f"    [checkpoint] saved at sample {next_idx} → {path}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Multi-GPU extraction via subprocesses
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _extract_multi_gpu(
+    loader: CURVTONDataloader,
+    cache_path: Path,
+    batch_size: int,
+    num_gpus: int,
+) -> Dict[str, np.ndarray]:
+    """Launch *num_gpus* subprocesses, each pinned to one GPU via
+    ``CUDA_VISIBLE_DEVICES``.  Shards the dataset by interleaving
+    (sample *i* goes to GPU ``i % num_gpus``).  After all workers
+    finish, merge the shard ``.npz`` files into one cache file.
+    """
+    shard_dir = cache_path.parent / f".shards_{cache_path.stem}"
+    shard_dir.mkdir(parents=True, exist_ok=True)
+
+    base_path    = str(loader.base_path)
+    difficulty   = loader.difficulty
+    sample_ratio = float(loader.sample_ratio)
+    seed         = int(loader.seed)
+    script       = str(Path(__file__).resolve())
+
+    procs = []
+    for gpu_id in range(num_gpus):
+        env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)}
+        cmd = [
+            sys.executable, script,
+            "--_shard_mode",
+            "--_shard_rank",       str(gpu_id),
+            "--_shard_world_size", str(num_gpus),
+            "--_shard_dir",        str(shard_dir),
+            "--base_path",         base_path,
+            "--_difficulty",       difficulty,
+            "--_sample_ratio",     str(sample_ratio),
+            "--_seed",             str(seed),
+            "--batch_size",        str(batch_size),
+        ]
+        print(f"  Launching shard worker {gpu_id} on GPU {gpu_id} ...")
+        procs.append(_sp.Popen(cmd, env=env))
+
+    # Wait for every worker
+    failed = []
+    for i, p in enumerate(procs):
+        rc = p.wait()
+        if rc != 0:
+            failed.append(i)
+            print(f"  ⚠ Shard worker {i} exited with code {rc}")
+
+    if failed:
+        raise RuntimeError(
+            f"Multi-GPU extraction failed for shard(s) {failed}.  "
+            f"Check logs above for details."
+        )
+
+    return _merge_feature_shards(shard_dir, num_gpus, cache_path)
+
+
+def _merge_feature_shards(
+    shard_dir: Path,
+    num_shards: int,
+    final_path: Path,
+) -> Dict[str, np.ndarray]:
+    """Concatenate per-GPU shard ``.npz`` files into a single cache."""
+    merged: Dict[str, list] = {k: [] for k in _FEATURE_KEYS}
+
+    for rank in range(num_shards):
+        sp = shard_dir / f"shard_{rank}.npz"
+        if not sp.exists():
+            print(f"  Warning: shard {sp} missing, skipping")
+            continue
+        d = dict(np.load(sp, allow_pickle=True))
+        for k in _FEATURE_KEYS:
+            if k in d and d[k].size > 0:
+                merged[k].append(d[k])
+        del d
+
+    result: Dict[str, np.ndarray] = {}
+    for k in _FEATURE_KEYS:
+        result[k] = np.concatenate(merged[k]) if merged[k] else np.array([])
+
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(final_path, **result)
+
+    total = max((len(v) for v in result.values() if v.size > 0), default=0)
+    print(f"  Merged {num_shards} shards → {final_path}  ({total} samples)")
+
+    # Clean up shard files and directory
+    for rank in range(num_shards):
+        sp = shard_dir / f"shard_{rank}.npz"
+        if sp.exists():
+            sp.unlink()
+    try:
+        shard_dir.rmdir()
+    except OSError:
+        pass
+
+    return result
+
+
+def _run_shard_worker(args) -> None:
+    """Subprocess entry-point: extract features for this rank's shard and save.
+
+    Called when the script is invoked with ``--_shard_mode``.
+    Each subprocess sees exactly **one** GPU (set via ``CUDA_VISIBLE_DEVICES``
+    by the parent), so ``device="cuda"`` maps to that GPU.
+    """
+    rank       = args._shard_rank
+    world_size = args._shard_world_size
+    device     = "cuda"  # CUDA_VISIBLE_DEVICES already scoped by parent
+
+    print(f"  [Shard {rank}/{world_size}] GPU={os.environ.get('CUDA_VISIBLE_DEVICES', '?')}")
+
+    loader = CURVTONDataloader(
+        base_path=args.base_path,
+        difficulty=args._difficulty,
+        sample_ratio=args._sample_ratio,
+        seed=args._seed,
+        return_paths=True,
+    )
+
+    extractor = FeatureExtractor(device=device)
+    tf = extractor._get_transform()
+
+    features: Dict[str, list] = {k: [] for k in _FEATURE_KEYS}
+    person_buf: List[torch.Tensor] = []
+    cloth_buf:  List[torch.Tensor] = []
+    processed = 0
+    N_total = len(loader)
+    N_mine  = (N_total + world_size - 1) // world_size
+
+    for i, (pp, cp, _tp, _meta) in enumerate(loader):
+        if i % world_size != rank:
+            continue
+        try:
+            person_buf.append(_load_image_tensor(pp, tf))
+            cloth_buf.append(_load_image_tensor(cp, tf))
+        except Exception:
+            continue
+
+        if len(person_buf) >= args.batch_size:
+            _flush_batch_into(extractor, person_buf, cloth_buf, features)
+
+        processed += 1
+        if processed % 500 == 0:
+            print(f"    [Shard {rank}] {processed}/{N_mine} ...")
+
+    _flush_batch_into(extractor, person_buf, cloth_buf, features)
+
+    # ── save shard ────────────────────────────────────────────────────
+    result: Dict[str, np.ndarray] = {}
+    for k in _FEATURE_KEYS:
+        if features[k]:
+            result[k] = (
+                np.array(features[k])
+                if np.isscalar(features[k][0])
+                else np.stack(features[k])
+            )
+        else:
+            result[k] = np.array([])
+
+    shard_path = Path(args._shard_dir) / f"shard_{rank}.npz"
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(shard_path, **result)
+    print(f"  [Shard {rank}] Done — {processed} samples → {shard_path}")
+
+    del extractor, features
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
 def run_curvton_eda(
     base_path: str,
     out_dir: str = "figures/curvton",
@@ -300,6 +503,7 @@ def run_curvton_eda(
     force_recompute: bool = False,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     batch_size: int = _EXTRACT_BATCH_SIZE,
+    num_gpus: int = 1,
 ):
     """
     Run full CURVTON EDA pipeline.
@@ -319,13 +523,15 @@ def run_curvton_eda(
     print(f"  Base path:    {base_path}")
     print(f"  Output:       {out_dir}")
     print(f"  Device:       {device}")
+    print(f"  GPUs:         {num_gpus}")
     print(f"  Batch size:   {batch_size}")
     print(f"  Sample ratio: {sample_ratio:.0%}")
     print(f"  Difficulties: {difficulties}")
     print("=" * 70)
     
-    # Initialize feature extractor with correct device
-    extractor = FeatureExtractor(device=device)
+    # Initialize feature extractor (only used in single-GPU mode;
+    # multi-GPU workers create their own)
+    extractor = FeatureExtractor(device=device) if num_gpus <= 1 else None
     
     # Collect features for each difficulty
     all_features = {}
@@ -343,7 +549,7 @@ def run_curvton_eda(
         cache_file = cache_path / f"curvton_{diff}_{int(sample_ratio*100)}pct.npz"
         features = extract_features_for_difficulty(
             loader, extractor, cache_file, force_recompute,
-            batch_size=batch_size,
+            batch_size=batch_size, num_gpus=num_gpus,
         )
         
         # Use display names for plots
@@ -448,6 +654,7 @@ def run_multi_ratio_eda(
     ratios: List[float] = [0.1, 0.2, 0.3, 0.4, 0.5, 1.0],
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     batch_size: int = _EXTRACT_BATCH_SIZE,
+    num_gpus: int = 1,
 ):
     """
     Run EDA for multiple sample ratios to analyze scaling behavior.
@@ -465,6 +672,7 @@ def run_multi_ratio_eda(
             sample_ratio=ratio,
             device=device,
             batch_size=batch_size,
+            num_gpus=num_gpus,
         )
 
 
@@ -511,16 +719,33 @@ if __name__ == "__main__":
         "--batch_size", type=int, default=_EXTRACT_BATCH_SIZE,
         help="Batch size for feature extraction (lower if OOM)"
     )
-    
+    parser.add_argument(
+        "--num_gpus", type=int, default=1,
+        help="Number of GPUs to use for parallel extraction (default: 1)"
+    )
+
+    # ── hidden args used by multi-GPU shard workers ───────────────────
+    parser.add_argument("--_shard_mode",       action="store_true",  help=argparse.SUPPRESS)
+    parser.add_argument("--_shard_rank",       type=int, default=0,  help=argparse.SUPPRESS)
+    parser.add_argument("--_shard_world_size", type=int, default=1,  help=argparse.SUPPRESS)
+    parser.add_argument("--_shard_dir",        type=str, default="", help=argparse.SUPPRESS)
+    parser.add_argument("--_difficulty",       type=str, default="easy", help=argparse.SUPPRESS)
+    parser.add_argument("--_sample_ratio",     type=float, default=1.0,  help=argparse.SUPPRESS)
+    parser.add_argument("--_seed",             type=int, default=42,     help=argparse.SUPPRESS)
+
     args = parser.parse_args()
-    
-    if args.multi_ratio:
+
+    # ── shard-worker mode (launched by _extract_multi_gpu) ────────────
+    if args._shard_mode:
+        _run_shard_worker(args)
+    elif args.multi_ratio:
         run_multi_ratio_eda(
             base_path=args.base_path,
             out_dir=args.out_dir,
             cache_dir=args.cache_dir,
             device=args.device,
             batch_size=args.batch_size,
+            num_gpus=args.num_gpus,
         )
     else:
         run_curvton_eda(
@@ -532,4 +757,5 @@ if __name__ == "__main__":
             force_recompute=args.force_recompute,
             device=args.device,
             batch_size=args.batch_size,
+            num_gpus=args.num_gpus,
         )
