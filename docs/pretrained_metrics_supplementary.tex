@@ -1,0 +1,460 @@
+% =============================================================================
+% ECCV 2026 Supplementary Material: Pretrained Metrics for Virtual Try-On
+% =============================================================================
+\documentclass[runningheads]{llncs}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{subcaption}
+\usepackage{bm}
+
+% Custom colors
+\definecolor{metricblue}{RGB}{31,119,180}
+\definecolor{metricgreen}{RGB}{44,160,44}
+\definecolor{metricorange}{RGB}{255,127,14}
+
+% Math shortcuts
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\bvec}[1]{\bm{#1}}
+\newcommand{\logdet}{\log\det}
+
+\begin{document}
+
+\title{Pretrained Metrics for Virtual Try-On Dataset Evaluation:\\
+Mathematical Foundations and Exploratory Analysis}
+
+\author{Supplementary Material}
+\institute{}
+
+\maketitle
+
+% =============================================================================
+\section{Introduction}
+% =============================================================================
+
+This supplementary document provides comprehensive mathematical formulations for our proposed pretrained metrics suite and describes the corresponding exploratory data analysis (EDA) visualizations. Our metrics quantify seven key dimensions of dataset diversity that are critical for training robust virtual try-on models:
+
+\begin{enumerate}
+    \item \textbf{Pose Diversity} --- Variation in body poses
+    \item \textbf{Occlusion Complexity} --- Garment visibility challenges
+    \item \textbf{Background Complexity} --- Scene complexity
+    \item \textbf{Illumination Variation} --- Lighting conditions
+    \item \textbf{Body Shape Diversity} --- Anthropometric variation
+    \item \textbf{Appearance Diversity} --- Subject diversity (ethnicity-proxy)
+    \item \textbf{Garment Texture Diversity} --- Clothing style/pattern variety
+\end{enumerate}
+
+All metrics follow a consistent paradigm: \textit{per-sample feature extraction} followed by \textit{dataset-level aggregation} (mean, variance, or covariance-based measures).
+
+\subsection{Datasets Used for EDA}
+
+Our exploratory analysis focuses on three representative virtual try-on datasets:
+
+\begin{itemize}
+    \item \textbf{VITON-HD}~\cite{choi2021vitonhd}: High-resolution studio dataset with $1024 \times 768$ images, clean backgrounds, and standardized poses.
+    \item \textbf{DressCode}~\cite{morelli2022dresscode}: Multi-category dataset covering upper-body, lower-body, and full dresses with diverse garment types.
+    \item \textbf{Street Try-On}: In-the-wild dataset featuring complex backgrounds, varied lighting conditions, and natural poses.
+\end{itemize}
+
+These datasets span the spectrum from controlled studio environments to challenging real-world scenarios, enabling comprehensive evaluation of metric sensitivity across different data characteristics.
+
+
+% =============================================================================
+\section{Metric 1: Pose Diversity \& Articulation}
+\label{sec:m1_pose}
+% =============================================================================
+
+\subsection{Mathematical Formulation}
+
+We extract 17 COCO keypoints $\bvec{p}_i \in \R^{17 \times 2}$ from each person image using ViTPose-B~\cite{xu2022vitpose}. After bounding-box normalization (centering at hip midpoint, scaling by torso length), we flatten these into a pose vector:
+\begin{equation}
+    \bvec{v}_i = \text{flatten}(\bvec{p}_i) \in \R^{34}
+\end{equation}
+
+\textbf{Pose Diversity (1A).} We compute the log-determinant of the sample covariance matrix as a measure of the volume of the pose distribution:
+\begin{equation}
+    D_{\text{pose}} = \logdet\left(\Cov(\bvec{v}) + \varepsilon \cdot \bvec{I}\right)
+\end{equation}
+where $\Cov(\bvec{v}) = \frac{1}{N-1}\sum_{i=1}^{N}(\bvec{v}_i - \bar{\bvec{v}})(\bvec{v}_i - \bar{\bvec{v}})^\top$ and $\varepsilon = 10^{-6}$ is a regularization constant.
+
+\textbf{Articulation Complexity (1B).} We define 8 limb triplets $(a, b, c)$ where $b$ is the vertex joint. For each triplet $k$, we compute the joint angle:
+\begin{equation}
+    \theta_k^{(i)} = \arccos\left(\frac{(\bvec{p}_a - \bvec{p}_b) \cdot (\bvec{p}_c - \bvec{p}_b)}{\|\bvec{p}_a - \bvec{p}_b\| \cdot \|\bvec{p}_c - \bvec{p}_b\|}\right)
+\end{equation}
+
+The articulation complexity is the sum of variances across all joint triplets:
+\begin{equation}
+    C_{\text{artic}} = \sum_{k=1}^{8} \Var(\theta_k)
+\end{equation}
+
+\textbf{Per-Image Articulation.} For interpretability, we also report:
+\begin{equation}
+    \bar{A} = \frac{1}{N}\sum_{i=1}^{N} \sigma(\theta_1^{(i)}, \ldots, \theta_8^{(i)})
+\end{equation}
+where $\sigma(\cdot)$ denotes standard deviation.
+
+\subsection{EDA Visualization (Figure 1)}
+
+\textbf{Figure 1A: Pose UMAP/t-SNE Scatter.} We apply UMAP~\cite{mcinnes2018umap} to the normalized pose vectors $\bvec{v}_i$ and visualize the 2D embedding colored by dataset. This reveals:
+\begin{itemize}
+    \item \textit{Cluster separation}: Different datasets occupy distinct pose subspaces
+    \item \textit{Pose coverage}: Datasets with broader scatter exhibit higher pose diversity
+\end{itemize}
+
+\textbf{Figure 1B: Joint Angle Distribution (KDE).} We show per-limb angle distributions as kernel density estimates (KDE) with overlaid histograms. Each panel displays one of the 8 limb triplet angles:
+\begin{itemize}
+    \item \textit{Narrow distributions} $\rightarrow$ constrained poses (e.g., studio datasets with standard standing poses)
+    \item \textit{Wide distributions} $\rightarrow$ diverse articulations (e.g., in-the-wild datasets with varied activities)
+    \item Vertical dashed lines indicate per-dataset means $\bar{\theta}_k$
+\end{itemize}
+
+
+% =============================================================================
+\section{Metric 2: Occlusion Complexity}
+\label{sec:m2_occlusion}
+% =============================================================================
+
+\subsection{Mathematical Formulation}
+
+We use Mask2Former~\cite{cheng2022mask2former} to segment the input image into semantic regions. Let $G_i$ denote the garment mask and $M_i$ denote the union of all occluding regions (body parts, carried objects, accessories, other people, environmental clutter).
+
+\textbf{Occlusion Ratio.} For each image, the occlusion ratio is:
+\begin{equation}
+    O_i = \frac{|G_i \cap M_i|}{|G_i|}
+\end{equation}
+representing the fraction of the garment region that is occluded.
+
+\textbf{Dataset-Level Statistics:}
+\begin{align}
+    \bar{O} &= \frac{1}{N}\sum_{i=1}^{N} O_i & \text{(Mean occlusion)} \\
+    \Var(O) &= \frac{1}{N}\sum_{i=1}^{N} (O_i - \bar{O})^2 & \text{(Variance)}
+\end{align}
+
+\textbf{Occlusion Complexity Score:}
+\begin{equation}
+    C_{\text{occ}} = \bar{O} + \Var(O)
+\end{equation}
+
+\textbf{Per-Category Breakdown.} We decompose occlusion by source:
+\begin{itemize}
+    \item $O_{\text{body}}$: Self-occlusion (arms, hands crossing torso)
+    \item $O_{\text{carried}}$: Bags, purses, shopping items
+    \item $O_{\text{accessory}}$: Jewelry, scarves, belts
+    \item $O_{\text{env}}$: Tables, chairs, railings
+    \item $O_{\text{people}}$: Other people in frame
+\end{itemize}
+
+\subsection{EDA Visualization (Figure 2)}
+
+\textbf{Figure 2A: Occlusion Ratio Histogram.} Overlaid histograms and KDE plots of $O_i$ across datasets, with vertical lines indicating means. Studio datasets typically show $\bar{O} < 0.05$, while in-the-wild datasets exhibit $\bar{O} > 0.15$.
+
+\textbf{Figure 2B: Spatial Occlusion Heatmap.} Aggregated mean occlusion masks visualized as heatmaps, revealing common occlusion patterns (e.g., lower torso occlusion from carried bags).
+
+
+% =============================================================================
+\section{Metric 3: Background Complexity}
+\label{sec:m3_background}
+% =============================================================================
+
+\subsection{Mathematical Formulation}
+
+\textbf{Person Segmentation.} We use DeepLabV3-ResNet101~\cite{chen2017deeplab} to obtain a binary person mask $P_i$, then define the background region as $B_i = \neg P_i$.
+
+\textbf{Background Texture Entropy (3A).} We compute the Shannon entropy of the grayscale histogram over background pixels:
+\begin{equation}
+    H_{\text{bg}}^{(i)} = -\sum_{j=0}^{255} p_j \log(p_j)
+\end{equation}
+where $p_j$ is the normalized frequency of grayscale bin $j$ in the background region.
+
+\textbf{Background Object Density (3B).} Using DETR~\cite{carion2020detr}, we detect objects in the background-masked image:
+\begin{equation}
+    n_i = |\{o : o \in \text{DETR}(I_i \odot B_i), \text{conf}(o) > 0.5\}|
+\end{equation}
+
+\textbf{Dataset-Level Aggregation:}
+\begin{align}
+    \bar{H}_{\text{bg}} &= \frac{1}{N}\sum_{i=1}^{N} H_{\text{bg}}^{(i)} \\
+    C_{\text{obj}} &= \frac{1}{N}\sum_{i=1}^{N} n_i
+\end{align}
+
+\subsection{EDA Visualization (Figure 3)}
+
+\textbf{Figure 3A: Background Entropy Histogram.} Distribution of $H_{\text{bg}}^{(i)}$ per dataset. Clean-studio datasets cluster near $H \approx 2.0$ (low entropy), while street-fashion datasets exhibit $H > 4.5$.
+
+\textbf{Figure 3B: Entropy vs. Object Count Scatter.} Joint visualization of $(H_{\text{bg}}, n_i)$ pairs, revealing two regimes:
+\begin{itemize}
+    \item \textit{Lower-left cluster}: Studio images (low entropy, few objects)
+    \item \textit{Upper-right spread}: Street images (high entropy, multiple objects)
+\end{itemize}
+
+
+% =============================================================================
+\section{Metric 4: Illumination Complexity}
+\label{sec:m4_illumination}
+% =============================================================================
+
+\subsection{Mathematical Formulation}
+
+\textbf{Luminance Extraction.} We convert RGB images to CIE-LAB color space and extract the L channel:
+\begin{equation}
+    L_i = \text{LAB}(I_i)[:, :, 0] / 255.0 \in [0, 1]
+\end{equation}
+
+\textbf{Mean Luminance.} Per-image average brightness:
+\begin{equation}
+    \mu_L^{(i)} = \frac{1}{HW}\sum_{x,y} L_i(x, y)
+\end{equation}
+
+\textbf{Gradient Variance.} We apply Sobel filters to capture lighting gradients:
+\begin{equation}
+    G_i = \sqrt{(S_x * L_i)^2 + (S_y * L_i)^2}
+\end{equation}
+and compute the spatial variance $\Var(G_i)$ as a measure of local illumination variation.
+
+\textbf{Dataset-Level Metrics:}
+\begin{align}
+    \bar{L} &= \frac{1}{N}\sum_{i=1}^{N} \mu_L^{(i)} & \text{(Global mean luminance)} \\
+    \Var(L) &= \Var(\mu_L^{(i)}) & \text{(Cross-image variance)} \\
+    \bar{G} &= \frac{1}{N}\sum_{i=1}^{N} \Var(G_i) & \text{(Mean gradient variance)}
+\end{align}
+
+\textbf{Illumination Complexity:}
+\begin{equation}
+    C_{\text{light}} = \Var(L) + \bar{G}
+\end{equation}
+
+\subsection{EDA Visualization (Figure 4)}
+
+\textbf{Figure 4A: Luminance Spectrum.} KDE plots of $\mu_L^{(i)}$ with regime bands:
+\begin{itemize}
+    \item Dark regime: $L \in [0, 0.3]$
+    \item Mid regime: $L \in [0.3, 0.7]$
+    \item Bright regime: $L \in [0.7, 1.0]$
+\end{itemize}
+
+\textbf{Figure 4B: Gradient Variance Distribution.} Shows diversity in local lighting effects; high variance indicates dramatic lighting (shadows, spotlights).
+
+
+% =============================================================================
+\section{Metric 5: Body Shape Diversity}
+\label{sec:m5_bodyshape}
+% =============================================================================
+
+\subsection{Mathematical Formulation}
+
+We extract SMPL~\cite{loper2015smpl} body shape coefficients $\bvec{\beta}_i \in \R^{10}$ using HMR2.0~\cite{goel20234dhumans}. These 10 principal components capture body proportions (height, weight, limb lengths, etc.).
+
+\textbf{Shape Diversity.} Similar to pose diversity, we compute:
+\begin{equation}
+    D_{\text{shape}} = \logdet\left(\Cov(\bvec{\beta}) + \varepsilon \cdot \bvec{I}\right)
+\end{equation}
+
+\textbf{Total Shape Variance:}
+\begin{equation}
+    V_{\text{shape}} = \sum_{k=1}^{10} \lambda_k
+\end{equation}
+where $\lambda_k$ are the eigenvalues of $\Cov(\bvec{\beta})$.
+
+\subsection{EDA Visualization (Figure 5)}
+
+\textbf{Figure 5A: Shape PCA Scatter.} 2D projection of $\bvec{\beta}_i$ with 1$\sigma$ confidence ellipses per dataset. Datasets with larger ellipses exhibit greater body shape diversity.
+
+\textbf{Figure 5B: Per-Coefficient Histograms.} Grid of 10 subplots showing distributions of $\beta_0, \ldots, \beta_9$. The first few coefficients (related to overall body size) typically show the most variation.
+
+
+% =============================================================================
+\section{Metric 6: Appearance Diversity}
+\label{sec:m6_appearance}
+% =============================================================================
+
+\subsection{Mathematical Formulation}
+
+To measure subject diversity without explicit ethnicity classification (avoiding bias), we extract face embeddings $\bvec{f}_i \in \R^{512}$ using ArcFace~\cite{deng2019arcface}.
+
+\textbf{Pairwise Cosine Distance.} After L2-normalization:
+\begin{equation}
+    d_{ij} = 1 - \cos(\bvec{f}_i, \bvec{f}_j) = 1 - \bvec{f}_i^\top \bvec{f}_j
+\end{equation}
+
+\textbf{Appearance Diversity:}
+\begin{equation}
+    D_{\text{face}} = \frac{2}{N(N-1)} \sum_{i < j} d_{ij}
+\end{equation}
+This is the mean pairwise cosine distance---higher values indicate more diverse appearances.
+
+\subsection{EDA Visualization (Figure 6)}
+
+\textbf{Figure 6A: Face Embedding UMAP.} 2D visualization of face embeddings colored by dataset. Homogeneous datasets show tight clusters; diverse datasets spread across the manifold.
+
+\textbf{Figure 6B: Pairwise Distance Histogram.} Distribution of $d_{ij}$ values. Datasets with means closer to 1.0 exhibit maximum diversity (dissimilar faces).
+
+
+% =============================================================================
+\section{Metric 7: Garment Texture Diversity}
+\label{sec:m7_garment}
+% =============================================================================
+
+\subsection{Mathematical Formulation}
+
+We extract CLIP~\cite{radford2021clip} image embeddings $\bvec{g}_i \in \R^{512}$ from garment images using ViT-B/32.
+
+\textbf{PCA-Based Log-Determinant.} To avoid rank deficiency (since normalized embeddings lie on a lower-dimensional manifold), we compute:
+\begin{equation}
+    D_{\text{garment}} = \sum_{k=1}^{K} \log(\lambda_k + \varepsilon)
+\end{equation}
+where $\lambda_k$ are the top-$K$ eigenvalues of $\Cov(\bvec{g})$ obtained via SVD:
+\begin{equation}
+    \bvec{G}_c = \bvec{U}\bvec{S}\bvec{V}^\top \implies \lambda_k = \frac{S_k^2}{N-1}
+\end{equation}
+and $K = \min(N-1, D, 128)$ keeps only the meaningful dimensions.
+
+\textbf{Total Variance:}
+\begin{equation}
+    V_{\text{garment}} = \sum_{k=1}^{K} \lambda_k
+\end{equation}
+
+\subsection{EDA Visualization (Figure 7)}
+
+\textbf{Figure 7A: Garment Embedding UMAP.} Reveals style clusters:
+\begin{itemize}
+    \item Solid colors vs. patterns
+    \item Formal vs. casual
+    \item Light vs. dark
+\end{itemize}
+
+\textbf{Figure 7B: Eigenvalue Spectrum.} Log-scale plot of $\lambda_k$ vs. $k$. Fast decay indicates low effective dimensionality (limited diversity); slow decay indicates rich texture variety.
+
+
+% =============================================================================
+\section{Meta-Analysis: Cross-Metric Correlations}
+\label{sec:m8_meta}
+% =============================================================================
+
+\subsection{Feature Vector Construction}
+
+For each image $i$, we construct a 7-dimensional feature vector:
+\begin{equation}
+    \bvec{x}_i = \left[\|\bvec{v}_i\|, O_i, H_{\text{bg}}^{(i)}, \mu_L^{(i)}, \|\bvec{\beta}_i\|, \|\bvec{f}_i\|, \|\bvec{g}_i\|\right]^\top
+\end{equation}
+
+\subsection{Correlation Analysis}
+
+We compute the Pearson correlation matrix $\bvec{R} \in \R^{7 \times 7}$:
+\begin{equation}
+    R_{jk} = \frac{\text{Cov}(x^{(j)}, x^{(k)})}{\sigma_{x^{(j)}} \cdot \sigma_{x^{(k)}}}
+\end{equation}
+
+\subsection{EDA Visualization (Figure 8)}
+
+\textbf{Figure 8A: Correlation Heatmap.} Symmetric heatmap of $\bvec{R}$ with annotated coefficients. Key findings:
+\begin{itemize}
+    \item Background entropy and illumination often correlate (outdoor scenes)
+    \item Occlusion and pose can correlate (certain poses cause self-occlusion)
+    \item Garment diversity is largely independent of other factors
+\end{itemize}
+
+\textbf{Figure 8B: Pairplot.} Scatter matrix showing all pairwise relationships with per-axis histograms on the diagonal.
+
+
+% =============================================================================
+\section{Summary of Metrics}
+\label{sec:summary}
+% =============================================================================
+
+\begin{table}[h!]
+\centering
+\caption{Summary of pretrained metrics for virtual try-on dataset evaluation.}
+\label{tab:metrics_summary}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Metric} & \textbf{Formula} & \textbf{Backbone} & \textbf{Output Dim.} \\
+\midrule
+M1: Pose & $\logdet(\Cov(\bvec{v}) + \varepsilon I)$ & ViTPose-B & $\bvec{v} \in \R^{34}$ \\
+M2: Occlusion & $\bar{O} = \frac{1}{N}\sum \frac{|G \cap M|}{|G|}$ & Mask2Former & scalar \\
+M3: Background & $H_{\text{bg}} = -\sum p_j \log p_j$ & DeepLabV3 + DETR & scalar \\
+M4: Illumination & $\Var(\mu_L) + \E[\Var(\nabla L)]$ & --- (signal proc.) & scalar \\
+M5: Body Shape & $\logdet(\Cov(\bvec{\beta}) + \varepsilon I)$ & HMR2.0 & $\bvec{\beta} \in \R^{10}$ \\
+M6: Appearance & $\frac{2}{N(N-1)}\sum_{i<j}(1 - \cos(f_i, f_j))$ & ArcFace & $\bvec{f} \in \R^{512}$ \\
+M7: Garment & $\sum_k \log(\lambda_k + \varepsilon)$ & CLIP ViT-B/32 & $\bvec{g} \in \R^{512}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% =============================================================================
+\section{Implementation Details}
+\label{sec:implementation}
+% =============================================================================
+
+\subsection{Score Aggregation}
+
+All metrics follow an accumulate-then-compute paradigm:
+
+\begin{algorithm}[h!]
+\caption{Metric Computation Pipeline}
+\begin{algorithmic}[1]
+\STATE \textbf{Initialize} metric accumulators
+\FOR{each batch $\mathcal{B}$ in dataset}
+    \STATE Extract features: $\{\bvec{z}_i\}_{i \in \mathcal{B}} \leftarrow \text{Backbone}(\mathcal{B})$
+    \STATE \textbf{Accumulate}: append $\bvec{z}_i$ to global list
+\ENDFOR
+\STATE \textbf{Compute}: aggregate statistics (mean, variance, $\logdet$, etc.)
+\STATE \textbf{Return}: dictionary of metric scores
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Computational Requirements}
+
+\begin{itemize}
+    \item \textbf{GPU Memory}: 8--16 GB recommended for batch processing
+    \item \textbf{Runtime}: $\sim$2--5 seconds per image (all metrics)
+    \item \textbf{Dependencies}: PyTorch, torchvision, transformers, insightface, timm
+\end{itemize}
+
+
+% =============================================================================
+% References
+% =============================================================================
+\bibliographystyle{splncs04}
+\begin{thebibliography}{10}
+
+\bibitem{xu2022vitpose}
+Xu, Y., et al.: ViTPose: Simple Vision Transformer Baselines for Human Pose Estimation. NeurIPS (2022)
+
+\bibitem{cheng2022mask2former}
+Cheng, B., et al.: Masked-attention Mask Transformer for Universal Image Segmentation. CVPR (2022)
+
+\bibitem{chen2017deeplab}
+Chen, L.C., et al.: Rethinking Atrous Convolution for Semantic Image Segmentation. arXiv:1706.05587 (2017)
+
+\bibitem{carion2020detr}
+Carion, N., et al.: End-to-End Object Detection with Transformers. ECCV (2020)
+
+\bibitem{loper2015smpl}
+Loper, M., et al.: SMPL: A Skinned Multi-Person Linear Model. ACM TOG (2015)
+
+\bibitem{goel20234dhumans}
+Goel, S., et al.: Humans in 4D: Reconstructing and Tracking Humans with Transformers. ICCV (2023)
+
+\bibitem{deng2019arcface}
+Deng, J., et al.: ArcFace: Additive Angular Margin Loss for Deep Face Recognition. CVPR (2019)
+
+\bibitem{radford2021clip}
+Radford, A., et al.: Learning Transferable Visual Models From Natural Language Supervision. ICML (2021)
+
+\bibitem{mcinnes2018umap}
+McInnes, L., et al.: UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction. arXiv:1802.03426 (2018)
+
+\end{thebibliography}
+
+\end{document}

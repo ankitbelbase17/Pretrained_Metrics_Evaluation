@@ -1,0 +1,52 @@
+# configs/eda_datasets.yaml
+# ------------------------------------------
+# EDA Config: Only DressCode, VITON-HD, and Street Try-On
+# Excludes LAION dataset as per requirements
+#
+# Run:
+#   python EDA/run_eda.py --config configs/eda_datasets.yaml
+
+defaults:
+  device: cuda
+  batch_size: 16
+  num_workers: 4
+  img_size: [512, 384]
+  split: test
+
+datasets:
+  # ─────────────────────────────────────────────────────────────────────────
+  # VITON-HD: High-resolution studio dataset
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: viton_hd
+    root: benchmark_datasets/viton_hd
+    img_size: [1024, 768]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # DressCode: Multi-category dataset (upper, lower, dresses)
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: dresscode
+    root: benchmark_datasets/dresscode
+    dresscode_category: upper_body
+
+  - name: dresscode
+    root: benchmark_datasets/dresscode
+    dresscode_category: lower_body
+
+  - name: dresscode
+    root: benchmark_datasets/dresscode
+    dresscode_category: dresses
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Street Try-On: In-the-wild dataset with complex backgrounds
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: street_tryon
+    root: benchmark_datasets/street_tryon
+    split: test
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOTE: LAION dataset is intentionally excluded from EDA.
+# The EDA focuses on curated virtual try-on datasets with:
+#   - Paired person/cloth images
+#   - Controlled or semi-controlled environments
+#   - Clear quality standards
+# ═══════════════════════════════════════════════════════════════════════════════

@@ -1,7 +1,7 @@
 """
 EDA/plots/p8_meta_correlation.py
 ==================================
-Meta-EDA — Complexity Correlation Matrix
+Meta-EDA — ECCV Publication Figures
 
 Constructs a per-image feature vector:
     x_i = [pose_norm, O_i, H_bg, L_i, ||β_i||, ||f_i||, ||g_i||]
@@ -26,40 +26,46 @@ from typing import Dict, List
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import seaborn as sns
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from plot_style import apply_paper_style, save_fig, PALETTE, DATASET_COLORS
+from plot_style import (
+    apply_paper_style, save_fig, 
+    PALETTE, DATASET_COLORS, DATASET_MARKERS,
+    add_subplot_label, despine_axes,
+)
 
 apply_paper_style()
 
+# Feature names for display
 FEATURE_NAMES = [
-    "Pose Complexity\n(||v_i||)",
-    "Occlusion\nRatio O_i",
-    "BG Entropy\nH_bg",
-    "Luminance\nL_i",
-    "Shape Norm\n||β_i||",
-    "Face Embed\n||f_i||",
-    "Garment\nEmbed ||g_i||",
+    "Pose\n$||v_i||$",
+    "Occlusion\n$O_i$",
+    "BG Entropy\n$H_{bg}$",
+    "Luminance\n$L_i$",
+    "Shape\n$||\\beta_i||$",
+    "Face\n$||f_i||$",
+    "Garment\n$||g_i||$",
 ]
 
 FEATURE_NAMES_SHORT = [
-    "Pose", "Occlusion", "BG_Entropy",
-    "Luminance", "Shape", "Face", "Garment",
+    "Pose", "Occ", "BG",
+    "Lum", "Shape", "Face", "Garment",
 ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 # Build feature matrix from cache
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_feature_matrix(d: dict) -> np.ndarray:
     """
     d: loaded .npz dict.
     Returns (N, 7) float32 matrix — one row per image.
     """
-    pose_norm    = np.linalg.norm(d["pose_vecs"],    axis=1)  # (N,)
+    pose_norm    = np.linalg.norm(d["pose_vecs"],    axis=1)
     occ          = d["occ_ratios"].astype(np.float32)
     bg_ent       = d["bg_entropy"].astype(np.float32)
     lum          = d["lum_mean"].astype(np.float32)
@@ -74,18 +80,17 @@ def _build_feature_matrix(d: dict) -> np.ndarray:
     return X
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Main correlation heatmap
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main correlation heatmap (ECCV Style)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def plot_correlation_matrix(
     datasets: Dict[str, np.ndarray],   # {name: feature_matrix (N,7)}
     out_dir: str = "figures/meta",
 ):
     """
-    For each dataset: full Pearson correlation heatmap (7×7).
-    If one dataset → single panel.
-    If multiple    → subplot grid (max 5 per row) + pooled panel.
+    ECCV-style correlation heatmap with clean annotations.
+    Per-dataset panels + pooled summary.
     """
     n = len(datasets)
     pooled_X = np.concatenate(list(datasets.values()), axis=0)
@@ -93,58 +98,69 @@ def plot_correlation_matrix(
     # ── Per-dataset panels ─────────────────────────────────────────────────
     cols = min(n, 3)
     rows = (n + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols,
-                             figsize=(5.5 * cols, 5 * rows + 0.5))
-    if n == 1:
-        axes = np.array([[axes]])
-    elif rows == 1:
-        axes = axes[np.newaxis, :]
+    
+    fig, axes = plt.subplots(
+        rows, cols,
+        figsize=(3.0 * cols, 2.8 * rows),
+        squeeze=False
+    )
     axes = axes.flatten()
 
-    def _corr_heatmap(X, ax, title, ds_name=""):
+    def _corr_heatmap(X, ax, title):
         df = pd.DataFrame(X, columns=FEATURE_NAMES_SHORT)
         corr = df.corr(method="pearson")
-        mask = np.zeros_like(corr, dtype=bool)
-        # Don't mask — show full matrix including redundant lower triangle
-        # so readers can verify symmetry in the paper
+        
+        # Create mask for upper triangle (optional - keep full for clarity)
+        mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
+        
         sns.heatmap(
-            corr, ax=ax, vmin=-1, vmax=1, center=0,
+            corr, ax=ax, 
+            vmin=-1, vmax=1, center=0,
             cmap="RdBu_r",
-            annot=True, fmt=".2f", annot_kws={"size": 8},
-            linewidths=0.4, linecolor="#dddddd",
-            square=True, cbar_kws={"shrink": 0.8},
+            annot=True, fmt=".2f", 
+            annot_kws={"size": 6, "weight": "normal"},
+            linewidths=0.3, linecolor="white",
+            square=True, 
+            cbar_kws={"shrink": 0.7, "aspect": 20},
             xticklabels=FEATURE_NAMES_SHORT,
             yticklabels=FEATURE_NAMES_SHORT,
         )
-        ax.set_title(title, fontsize=11, fontweight="bold", pad=6)
-        ax.tick_params(axis="x", rotation=35, labelsize=8)
-        ax.tick_params(axis="y", rotation=0,  labelsize=8)
+        ax.set_title(title, fontsize=9, fontweight="bold", pad=6)
+        ax.tick_params(axis="x", rotation=45, labelsize=7)
+        ax.tick_params(axis="y", rotation=0,  labelsize=7)
+        
+        # Style colorbar
+        cbar = ax.collections[0].colorbar
+        cbar.ax.tick_params(labelsize=6)
 
     for i, (name, X) in enumerate(datasets.items()):
         X_clean = np.nan_to_num(X)
         _corr_heatmap(X_clean, axes[i], name)
+        if i == 0:
+            add_subplot_label(axes[i], "(a)", x=-0.15, y=1.10, fontsize=10)
 
     for j in range(i + 1, len(axes)):
         axes[j].set_visible(False)
 
-    fig.suptitle("Per-Image Complexity Feature Correlation Matrix\n"
-                 "Corr(x_i) — Pearson",
-                 fontsize=14, fontweight="bold", y=1.01)
+    fig.suptitle("Feature Correlation Matrix — Per Dataset",
+                 fontsize=11, fontweight="bold", y=1.02)
     plt.tight_layout()
     save_fig(fig, Path(out_dir), "correlation_matrix_per_dataset")
 
     # ── Pooled (all datasets) ──────────────────────────────────────────────
-    fig2, ax2 = plt.subplots(figsize=(8, 6.5))
-    _corr_heatmap(np.nan_to_num(pooled_X), ax2, "All Datasets Pooled")
+    fig2, ax2 = plt.subplots(figsize=(4.5, 4.0))
+    _corr_heatmap(np.nan_to_num(pooled_X), ax2, "All Datasets (Pooled)")
+    add_subplot_label(ax2, "(b)", x=-0.12, y=1.08, fontsize=10)
+    
     fig2.suptitle("Pooled Complexity Correlation Matrix",
-                  fontsize=13, fontweight="bold", y=1.01)
+                  fontsize=11, fontweight="bold", y=1.02)
     plt.tight_layout()
     save_fig(fig2, Path(out_dir), "correlation_matrix_pooled")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Scatter-matrix (pairplot)
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# Scatter-matrix (pairplot) — ECCV Style
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def plot_scatter_matrix(
     datasets: Dict[str, np.ndarray],   # {name: feature_matrix (N,7)}
@@ -152,8 +168,8 @@ def plot_scatter_matrix(
     max_per_ds: int = 300,
 ):
     """
-    Seaborn pairplot with dataset hue.
-    Subsampled to max_per_ds per dataset for readability.
+    ECCV-style pairplot with dataset hue.
+    Subsampled for readability.
     """
     rows_list = []
     for name, X in datasets.items():
@@ -165,22 +181,42 @@ def plot_scatter_matrix(
         rows_list.append(df)
 
     df_all = pd.concat(rows_list, ignore_index=True)
-    palette = {n: DATASET_COLORS.get(n, PALETTE[i])
+    palette = {n: DATASET_COLORS.get(n, PALETTE[i % len(PALETTE)])
                for i, n in enumerate(datasets.keys())}
 
     g = sns.pairplot(
-        df_all, hue="Dataset", plot_kws=dict(alpha=0.4, s=8, linewidth=0),
-        diag_kind="kde", diag_kws=dict(fill=True, alpha=0.4),
-        palette=palette, corner=True,
+        df_all, 
+        hue="Dataset", 
+        plot_kws=dict(alpha=0.35, s=5, linewidth=0, rasterized=True),
+        diag_kind="kde", 
+        diag_kws=dict(fill=True, alpha=0.2, linewidth=0.8),
+        palette=palette, 
+        corner=True,
     )
+    
+    # Style improvements
+    for ax in g.axes.flatten():
+        if ax is not None:
+            ax.tick_params(labelsize=6)
+            for spine in ax.spines.values():
+                spine.set_linewidth(0.5)
+    
     g.fig.suptitle("Pairwise Scatter Matrix — Complexity Features",
-                   fontsize=13, fontweight="bold", y=1.01)
+                   fontsize=11, fontweight="bold", y=1.01)
+    
+    # Improve legend
+    g._legend.set_title("Dataset")
+    g._legend.get_title().set_fontsize(8)
+    g._legend.get_title().set_fontweight("bold")
+    for text in g._legend.get_texts():
+        text.set_fontsize(7)
+    
     save_fig(g.fig, Path(out_dir), "scatter_matrix")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 # CLI
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _cli():
     p = argparse.ArgumentParser()

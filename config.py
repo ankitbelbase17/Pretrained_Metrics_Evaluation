@@ -13,21 +13,44 @@ BASE_DIR = Path(__file__).parent.absolute()
 # Dataset Root Directories
 # Default paths can be overridden by environment variables
 DATASET_ROOTS = {
-    # Existing
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Standard Benchmark Datasets
+    # ═══════════════════════════════════════════════════════════════════════════
     "viton":              os.getenv("VITON_ROOT", str(BASE_DIR / "VITON")),
     "vitonhd":            os.getenv("VITONHD_ROOT", str(BASE_DIR / "benchmark_datasets" / "viton_hd")),
     "dresscode":          os.getenv("DRESSCODE_ROOT", str(BASE_DIR / "benchmark_datasets" / "dresscode")),
     "mpv":                os.getenv("MPV_ROOT", str(BASE_DIR / "MPV")),
     "deepfashion":        os.getenv("DEEPFASHION_ROOT", str(BASE_DIR / "DeepFashion")),
+    
     # LAION-RVS-Fashion stored locally under benchmark_datasets/
     "laion_fashion":      os.getenv("LAION_ROOT", str(BASE_DIR / "benchmark_datasets" / "LAION-RVS-Fashion")),
 
     # street_tryon: dataroot is benchmark_datasets/ so that YAML paths like
     # "street_tryon/validation/image" resolve to the correct subdirectory.
     "street_tryon":       os.getenv("STREET_TRYON_ROOT", str(BASE_DIR / "benchmark_datasets")),
-    "curvton":            os.getenv("CURVTON_ROOT", str(BASE_DIR / "curvton")),
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CURVTON Dataset (Easy / Medium / Hard difficulty splits)
+    # HPC paths: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/
+    # Structure: {difficulty}/{gender}/{cloth_image|initial_person_image|tryon_image}/
+    # ═══════════════════════════════════════════════════════════════════════════
+    "curvton":            os.getenv("CURVTON_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate"),
+    "curvton_train":      os.getenv("CURVTON_TRAIN_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate"),
+    "curvton_test":       os.getenv("CURVTON_TEST_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test"),
+    
+    # Per-difficulty shortcuts (train)
+    "curvton_easy":       os.getenv("CURVTON_EASY_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate/easy"),
+    "curvton_medium":     os.getenv("CURVTON_MEDIUM_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate/medium"),
+    "curvton_hard":       os.getenv("CURVTON_HARD_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate/hard"),
+    
+    # Per-difficulty shortcuts (test)
+    "curvton_easy_test":   os.getenv("CURVTON_EASY_TEST_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test/easy"),
+    "curvton_medium_test": os.getenv("CURVTON_MEDIUM_TEST_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test/medium"),
+    "curvton_hard_test":   os.getenv("CURVTON_HARD_TEST_ROOT", "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test/hard"),
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # Legacy / Compatibility
+    # ═══════════════════════════════════════════════════════════════════════════
     "vton":               os.getenv("VITON_ROOT", str(BASE_DIR / "VITON")),
     "deepfashion_tryon":  os.getenv("DEEPFASHION_ROOT", str(BASE_DIR / "DeepFashion")),
 }

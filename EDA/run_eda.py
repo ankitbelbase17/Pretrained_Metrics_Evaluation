@@ -68,6 +68,9 @@ from plots.p7_garment_eda     import plot_garment_umap, plot_eigenvalue_spectrum
 from plots.p8_meta_correlation import (
     plot_correlation_matrix, plot_scatter_matrix, _build_feature_matrix
 )
+from plots.p9_vae_eda          import (
+    plot_vae_pca, plot_vae_pca_combined, plot_vae_explained_variance, plot_vae_tsne
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -180,7 +183,19 @@ def run_all_plots(
         plot_correlation_matrix(Xs, out_dir=str(P / "meta"))
         if not no_pairplot:
             plot_scatter_matrix(Xs, out_dir=str(P / "meta"))
-
+    # ── P9: VAE Latent Space ────────────────────────────────────────
+    if "p9" not in skip:
+        # Check if VAE embeddings exist
+        has_vae = any("vae_embs" in d for d in all_data.values())
+        if has_vae:
+            print("\n  [P9] VAE Latent Space …")
+            vae_data = {n: d["vae_embs"] for n, d in all_data.items() if "vae_embs" in d}
+            plot_vae_pca(vae_data, out_dir=str(P / "vae"))
+            plot_vae_pca_combined(vae_data, out_dir=str(P / "vae"))
+            plot_vae_explained_variance(vae_data, out_dir=str(P / "vae"))
+            plot_vae_tsne(vae_data, out_dir=str(P / "vae"))
+        else:
+            print("\n  [P9] Skipping VAE plots (no vae_embs in cache)")
     print("\n  ✓  All EDA figures complete.")
     print(f"     Output → {P.resolve()}/\n")
 
@@ -205,6 +220,7 @@ def _make_synthetic_data(n: int = 200, seed: int = 0) -> dict:
         betas       = rng.normal(0, 1, (n, 10)).astype(np.float32),
         face_embs   = rng.normal(0, 1, (n, 512)).astype(np.float32),
         garment_embs= rng.normal(0, 1, (n, 512)).astype(np.float32),
+        vae_embs    = rng.normal(0, 1, (n, 4*64*48)).astype(np.float32),
     )
 
 

@@ -1,0 +1,97 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Training Evaluation Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Compute pretrained metrics for:
+# - VITON-HD Test Set
+# - DressCode Test Set
+# - CURVTON Test Set (Easy, Medium, Hard separately)
+#
+# Run during each training checkpoint evaluation
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Benchmark Datasets (Standard Test Sets)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+viton_hd_test:
+  name: "VITON-HD Test"
+  type: "vitonhd"
+  base_path: "/path/to/viton_hd"
+  split: "test"
+  enabled: true
+
+dresscode_test:
+  name: "DressCode Test"
+  type: "dresscode"
+  base_path: "/path/to/dresscode"
+  split: "test"
+  categories: ["upper_body", "lower_body", "dresses"]
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CURVTON Test Sets (by Difficulty)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+curvton_easy_test:
+  name: "CURVTON Easy"
+  type: "curvton"
+  base_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test"
+  difficulty: "easy"
+  enabled: true
+  color: "#1B9E77"  # ColorBrewer Dark2: dark teal-green
+
+curvton_medium_test:
+  name: "CURVTON Medium"
+  type: "curvton"
+  base_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test"
+  difficulty: "medium"
+  enabled: true
+  color: "#D95F02"  # ColorBrewer Dark2: dark orange
+
+curvton_hard_test:
+  name: "CURVTON Hard"
+  type: "curvton"
+  base_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test"
+  difficulty: "hard"
+  enabled: true
+  color: "#7570B3"  # ColorBrewer Dark2: muted purple-blue
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Metrics to Compute
+# ═══════════════════════════════════════════════════════════════════════════════
+
+metrics:
+  # Pretrained metrics (always compute)
+  pose_error: true
+  occlusion_ratio: true
+  background_complexity: true
+  illumination_consistency: true
+  body_shape_preservation: true
+  appearance_diversity: true
+  garment_texture_fidelity: true
+  unified_index: true
+  
+  # Standard image metrics (optional)
+  ssim: true
+  lpips: true
+  fid: true
+  kid: false  # slower, optional
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Output Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+
+output:
+  base_dir: "eval_results"
+  save_json: true
+  save_csv: true
+  generate_plots: true
+  
+# ═══════════════════════════════════════════════════════════════════════════════
+# Evaluation Schedule (for training)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+schedule:
+  eval_every_n_steps: 5000
+  eval_at_end: true
+  max_eval_samples: 1000  # -1 for full test set

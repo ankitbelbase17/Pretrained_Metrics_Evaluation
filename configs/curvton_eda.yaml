@@ -1,0 +1,78 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# CURVTON Dataset EDA Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+# 
+# Difficulty Splits: Easy, Medium, Hard
+# Sample Ratios: 10%, 20%, 30%, 40%, 50%, 100%
+# 
+# Base paths (local HPC storage):
+#   Train: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate
+#   Test:  /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test
+
+datasets:
+  curvton_easy:
+    name: "CURVTON Easy"
+    base_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate"
+    test_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test"
+    difficulty: "easy"
+    color: "#1B9E77"  # ColorBrewer Dark2: dark teal-green
+    marker: "o"
+    linestyle: "-"
+    
+  curvton_medium:
+    name: "CURVTON Medium"
+    base_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate"
+    test_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test"
+    difficulty: "medium"
+    color: "#D95F02"  # ColorBrewer Dark2: dark orange
+    marker: "s"
+    linestyle: "--"
+    
+  curvton_hard:
+    name: "CURVTON Hard"
+    base_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate"
+    test_path: "/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate_test"
+    difficulty: "hard"
+    color: "#7570B3"  # ColorBrewer Dark2: muted purple-blue
+    marker: "^"
+    linestyle: "-."
+
+# Sample ratios for scalability analysis
+sample_ratios:
+  - 0.10
+  - 0.20
+  - 0.30
+  - 0.40
+  - 0.50
+  - 1.00
+
+# Output directories
+output:
+  features_cache: "eda_cache/curvton"
+  figures: "figures/curvton"
+  metrics: "metrics_output/curvton"
+
+# EDA plots to generate
+eda_plots:
+  - pose_umap
+  - joint_angle_distribution
+  - occlusion_histogram
+  - bg_entropy
+  - luminance_spectrum
+  - shape_pca
+  - shape_coefficients
+  - appearance_umap
+  - garment_umap
+  - garment_eigenvalue
+
+# Comparison groups for overlay plots
+comparison_groups:
+  difficulty_comparison:
+    name: "Difficulty Comparison"
+    datasets: ["curvton_easy", "curvton_medium", "curvton_hard"]
+    description: "Compare Easy vs Medium vs Hard splits"
+    
+  curvton_vs_benchmarks:
+    name: "CURVTON vs Benchmarks"
+    datasets: ["curvton_easy", "curvton_medium", "curvton_hard", "viton_hd", "dresscode"]
+    description: "Compare CURVTON splits against standard benchmarks"

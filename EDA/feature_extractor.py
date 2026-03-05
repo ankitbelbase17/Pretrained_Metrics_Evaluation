@@ -26,6 +26,7 @@ Per-image features stored
   beta_i    : (10,)   body shape coefficients (proxy)      (m5)
   face_i    : (D,)    ArcFace / CLIP face embedding        (m6)
   garment_i : (D,)    CLIP garment embedding               (m7)
+  vae_i     : (D,)    Stable Diffusion VAE latent          (m8)
 
 Everything is stored as a single ``.npz`` file per dataset in ``cache_dir``.
 """
@@ -58,6 +59,7 @@ from pretrained_metrics.metrics.m4_illumination    import _rgb_to_lab_l, _sobel_
 from pretrained_metrics.metrics.m5_body_shape      import _ShapeExtractor
 from pretrained_metrics.metrics.m6_appearance      import _FaceEmbedder
 from pretrained_metrics.metrics.m7_garment_texture import _GarmentEncoder
+from pretrained_metrics.metrics.m8_vae_latent      import _VAEEncoder
 
 
 # Import standalone dataloaders (from dataloaders/ package)
@@ -106,6 +108,7 @@ class FeatureExtractor:
         self._shape_ex   = _ShapeExtractor(device)
         self._face_ex    = _FaceEmbedder(device)
         self._garment_ex = _GarmentEncoder(device)
+        self._vae_ex     = _VAEEncoder(device)
         print("[FeatureExtractor] All backends ready.")
 
     # ── cache management ──────────────────────────────────────────────── #
@@ -169,8 +172,9 @@ class FeatureExtractor:
                 pass
 
         # Adjust dataset name if using anish specialized loaders
+        # NOTE: LAION is excluded from EDA - only dresscode, vitonhd, street_tryon supported
         if use_anish and not dataset_name.endswith("_anish"):
-            if dataset_name.lower() in ["dresscode", "vitonhd", "laion"]:
+            if dataset_name.lower() in ["dresscode", "vitonhd", "street_tryon"]:
                 dataset_name = f"{dataset_name.lower()}_anish"
 
         label_for_print = cache_label or dataset_name
@@ -194,6 +198,7 @@ class FeatureExtractor:
         bg_ents, bg_objs       = [], []
         lum_means, lum_vars, lum_maps_acc = [], [], []
         betas, face_embs, garment_embs    = [], [], []
+        vae_embs = []
 
         for batch in tqdm(loader, desc=f"  {dataset_name}", unit="batch"):
             person = batch["person"].float()   # (B, 3, H, W)  [0,1]
@@ -274,6 +279,11 @@ class FeatureExtractor:
             for gi in g:
                 garment_embs.append(gi.astype(np.float32))
 
+            # ── M8: VAE Latent ──────────────────────────────────────────── #
+            v = self._vae_ex(person)                     # (B, D)
+            for vi in v:
+                vae_embs.append(vi.astype(np.float32))
+
         # ── Pack and save ───────────────────────────────────────────────── #
         data = dict(
             pose_vecs    = np.stack(pose_vecs),
@@ -288,6 +298,7 @@ class FeatureExtractor:
             betas        = np.stack(betas),
             face_embs    = np.stack(face_embs),
             garment_embs = np.stack(garment_embs),
+            vae_embs     = np.stack(vae_embs),
         )
         np.savez_compressed(cp, **data)
         print(f"[FeatureExtractor] Cached → {cp}")
