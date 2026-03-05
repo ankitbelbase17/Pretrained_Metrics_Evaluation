@@ -111,6 +111,100 @@ class FeatureExtractor:
         self._vae_ex     = _VAEEncoder(device)
         print("[FeatureExtractor] All backends ready.")
 
+    # ── single-image extraction (used by run_curvton_eda) ─────────────── #
+    _img_transform = None
+
+    @staticmethod
+    def _get_transform(img_size: Tuple[int, int] = (512, 384)):
+        import torchvision.transforms as T
+        return T.Compose([T.Resize(img_size), T.ToTensor()])
+
+    def extract_all(
+        self,
+        person_path: str,
+        cloth_path: str,
+        img_size: Tuple[int, int] = (512, 384),
+    ) -> Dict[str, np.ndarray]:
+        """
+        Extract **all** per-image features from a single (person, cloth) pair.
+
+        This is the single-image counterpart of :meth:`extract` (which
+        processes a full dataset via DataLoader).  Called by
+        ``run_curvton_eda.extract_features_for_difficulty``.
+
+        Parameters
+        ----------
+        person_path : str – path to the person / initial image
+        cloth_path  : str – path to the cloth image
+
+        Returns
+        -------
+        dict with keys that match the batch-level feature names:
+            pose_vecs, angles, occlusion, bg_entropy, bg_obj_count,
+            lum_mean, lum_grad_var, betas, face_embs, garment_embs
+        """
+        from PIL import Image
+
+        if self._img_transform is None:
+            FeatureExtractor._img_transform = self._get_transform(img_size)
+        tf = self._img_transform
+
+        person_t = tf(Image.open(person_path).convert("RGB")).unsqueeze(0)  # (1,3,H,W)
+        cloth_t  = tf(Image.open(cloth_path).convert("RGB")).unsqueeze(0)
+
+        out: Dict[str, np.ndarray] = {}
+
+        # M1 – Pose
+        kps_raw = self._kp_ext(person_t)                 # (1,17,2)
+        kps_norm, valid = _normalise_pose(kps_raw)
+        if valid[0]:
+            pn = kps_norm[0]
+            out["pose_vecs"] = pn.flatten().astype(np.float32)
+            ang = [
+                _joint_angle(pn[ia], pn[ib], pn[ic])
+                for ia, ib, ic in TRIPLET_IDX
+            ]
+            out["angles"] = np.array(
+                [a if not math.isnan(a) else 0.0 for a in ang], dtype=np.float32,
+            )
+        else:
+            out["pose_vecs"] = np.zeros(34, dtype=np.float32)
+            out["angles"]    = np.zeros(len(TRIPLET_IDX), dtype=np.float32)
+
+        # M2 – Occlusion
+        seg = self._seg.segment(person_t)
+        G  = seg["garment"].float()
+        occ = ((seg["arms"].float() + seg["hair"].float() + seg["other"].float()) > 0).float()
+        overlap = G * occ
+        g_area = G[0].sum().item()
+        out["occlusion"] = float(min(overlap[0].sum().item() / max(g_area, 1.0), 1.0))
+
+        # M3 – Background
+        pmask = self._per_seg(person_t)
+        obj_c = self._obj_det.count_objects(person_t, pmask)
+        ent   = _texture_entropy(person_t[0], pmask[0])
+        out["bg_entropy"]   = float(ent) if not math.isnan(ent) else 0.0
+        out["bg_obj_count"] = int(obj_c[0])
+
+        # M4 – Illumination
+        mean_L, L_maps = _rgb_to_lab_l(person_t.cpu())
+        out["lum_mean"]     = float(mean_L[0])
+        out["lum_grad_var"] = _sobel_gradient_variance(L_maps[0])
+
+        # M5 – Body shape
+        b = self._shape_ex(person_t)
+        out["betas"] = b[0].astype(np.float32)
+
+        # M6 – Appearance
+        f = self._face_ex(person_t)
+        out["face_embs"] = f[0].astype(np.float32)
+
+        # M7 – Garment
+        g = self._garment_ex(cloth_t)
+        out["garment_embs"] = g[0].astype(np.float32)
+
+        return out
+
     # ── cache management ──────────────────────────────────────────────── #
     def cache_path(self, dataset_name: str) -> Path:
         return self.cache_dir / f"{dataset_name}_features.npz"
