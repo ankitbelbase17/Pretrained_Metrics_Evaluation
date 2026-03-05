@@ -1,12 +1,106 @@
-# Virtual Try-On Evaluation Pipeline
+# Pretrained Metrics Evaluation
 
-## Overview
-
-A modular evaluation suite computing **11 metrics** across **10 virtual try-on datasets** from a single command.
+A comprehensive evaluation framework for Virtual Try-On systems using pretrained metrics. Includes EDA (Exploratory Data Analysis), pretrained metrics computation, and in-the-wild evaluation capabilities.
 
 ---
 
-## Metrics
+## 📁 Project Structure
+
+```
+Pretrained_Metrics_Evaluation/
+├── configs/                    # YAML configuration files
+├── dataloaders/                # Dataset-specific dataloaders
+│   ├── curvton_dataloader.py   # CURVTON dataset (Easy/Medium/Hard)
+│   ├── dresscode_dataloader.py # DressCode dataset
+│   ├── vitonhd_dataloader.py   # VITON-HD dataset
+│   └── ...
+├── datasets/                   # Base dataset classes
+├── EDA/                        # Exploratory Data Analysis
+│   ├── feature_extractor.py    # Feature extraction pipeline
+│   ├── plot_style.py           # ECCV publication-quality styling
+│   ├── run_curvton_eda.py      # CURVTON EDA pipeline
+│   ├── run_eda.py              # General EDA pipeline
+│   └── plots/                  # Individual EDA plot modules
+│       ├── p1_pose_eda.py
+│       ├── p2_occlusion_eda.py
+│       ├── p3_background_eda.py
+│       ├── p4_illumination_eda.py
+│       ├── p5_body_shape_eda.py
+│       ├── p6_appearance_eda.py
+│       ├── p7_garment_eda.py
+│       ├── p11_clip_embedding_eda.py
+│       └── ...
+├── metrics/                    # Core evaluation metrics
+│   ├── distribution_metrics.py # FID, KID, etc.
+│   ├── image_metrics.py        # SSIM, LPIPS, etc.
+│   ├── vlm_score.py            # VLM-based plausibility (Qwen3-VL)
+│   └── ...
+├── pretrained_metrics/         # Pretrained metric computation
+│   ├── metrics/                # Individual metric implementations
+│   │   ├── m1_pose.py
+│   │   ├── m2_occlusion.py
+│   │   ├── m3_background.py
+│   │   ├── m4_illumination.py
+│   │   ├── m5_body_shape.py
+│   │   ├── m6_appearance.py
+│   │   ├── m7_garment_texture.py
+│   │   ├── m8_vae_latent.py
+│   │   └── m9_camera_angle.py
+│   └── compute_pretrained_metrics.py
+├── on_the_wild_evaluation/     # In-the-wild evaluation
+│   ├── vlm_evaluator.py        # VLM-based evaluation
+│   ├── clip_garment_evaluator.py
+│   ├── pose_evaluator.py
+│   └── ...
+├── evaluate.py                 # Main evaluation script
+├── config.py                   # Global configuration
+└── requirements.txt            # Python dependencies
+```
+
+---
+
+## 🚀 Installation
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/ankitbelbase17/Pretrained_Metrics_Evaluation.git
+cd Pretrained_Metrics_Evaluation
+```
+
+### 2. Create virtual environment
+```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# Linux/Mac
+source venv/bin/activate
+```
+
+### 3. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Install additional packages (optional)
+```bash
+# For CLIP embeddings
+pip install openai-clip
+# or
+pip install open-clip-torch
+
+# For flash attention (recommended for VLM)
+pip install flash-attn --no-build-isolation
+
+# For distribution metrics
+pip install torch-fidelity
+
+# For pose estimation
+pip install timm
+```
+
+---
+
+## 📊 Metrics
 
 | Metric | Direction | Implementation |
 |---|---|---|
@@ -17,186 +111,272 @@ A modular evaluation suite computing **11 metrics** across **10 virtual try-on d
 | **FID** | ↓ | `torch-fidelity` |
 | **IS (mean ± std)** | ↑ | `torch-fidelity` |
 | **KID (mean ± std)** | ↓ | `torch-fidelity` |
-| **Pose Error (PE)** | ↓ | HRNet-W32 keypoints via `timm`; pixel-proxy fallback |
-| **VLM Score** | ↑ | BLIP-2 plausibility 1-10; graceful stub fallback |
-| **JEPA EPE** | ↓ | Embedding Prediction Error via ViT-B/16 + linear predictor |
-| **JEPA Trace Σ** | ↑ | Tr(Cov) over target embeddings |
+| **Pose Error (PE)** | ↓ | HRNet-W32 keypoints via `timm` |
+| **VLM Score** | ↑ | Qwen3-VL-32B plausibility 0-1 |
+| **JEPA EPE** | ↓ | Embedding Prediction Error via ViT-B/16 |
 
 ---
 
-## Datasets
+## 📊 Running EDA (Exploratory Data Analysis)
 
-| # | Name | Flag | Paper |
-|---|---|---|---|
-| 1 | VITON | `viton` | Han et al. 2018 |
-| 2 | VITON-HD | `viton_hd` | Choi et al. 2021 |
-| 3 | DressCode | `dresscode` | Morelli et al. 2022 |
-| 4 | MPV | `mpv` | Dong et al. 2019 |
-| 5 | DeepFashion-TryOn | `deepfashion_tryon` | Ge et al. 2021 |
-| 6 | ACGPN | `acgpn` | Yang et al. 2020 |
-| 7 | CP-VTON | `cp_vton` | Wang et al. 2018 |
-| 8 | HR-VTON | `hr_vton` | Lee et al. 2022 |
-| 9 | LaDI-VTON | `ladi_vton` | Morelli et al. 2023 |
-| 10 | OVNet | `ovnet` | — |
-
-Each dataset returns `(cloth, person, gt, mask)` via a unified DataLoader.
-
----
-
-## Project Structure
-
-```
-pretrained_metrics_evals/
-│
-├── evaluate.py               ← Main evaluation script
-├── demo_synthetic.py         ← Smoke-test (no dataset needed)
-├── requirements.txt
-│
-├── datasets/
-│   ├── __init__.py
-│   ├── base_dataset.py       ← Abstract base class
-│   └── loaders.py            ← 10 concrete dataset loaders + registry
-│
-├── metrics/
-│   ├── __init__.py
-│   ├── image_metrics.py      ← PSNR, SSIM, Masked-SSIM, LPIPS
-│   ├── distribution_metrics.py ← FID, IS, KID
-│   ├── pose_error.py         ← Pose Error (HRNet / proxy)
-│   ├── vlm_score.py          ← VLM Plausibility Score (BLIP-2)
-│   └── jepa_metrics.py       ← JEPA EPE + Trace
-│
-├── configs/
-│   └── all_datasets.yaml     ← Multi-dataset config template
-│
-└── results/                  ← Auto-created; JSON + CSV outputs
-```
-
----
-
-## Installation
+### CURVTON Dataset EDA
 
 ```bash
-pip install -r requirements.txt
+# Full EDA pipeline (all difficulty levels)
+python EDA/run_curvton_eda.py \
+    --base_path /path/to/curvton/dataset_ultimate \
+    --out_dir figures/curvton \
+    --sample_ratio 1.0
+
+# 20% sample for quick analysis
+python EDA/run_curvton_eda.py \
+    --base_path /path/to/curvton/dataset_ultimate \
+    --out_dir figures/curvton_20pct \
+    --sample_ratio 0.2
+
+# Specific difficulty levels
+python EDA/run_curvton_eda.py \
+    --base_path /path/to/curvton/dataset_ultimate \
+    --difficulties easy medium \
+    --sample_ratio 0.5
+
+# Force recompute cached features
+python EDA/run_curvton_eda.py \
+    --base_path /path/to/curvton/dataset_ultimate \
+    --force_recompute
 ```
 
-> **Optional heavy dependencies** (install only what you need):
-> - `pip install lpips` — LPIPS
-> - `pip install torch-fidelity` — FID / IS / KID
-> - `pip install timm` — HRNet (Pose Error) + ViT (JEPA)
-> - `pip install transformers accelerate` — VLM Score (BLIP-2)
+### CLIP Embedding EDA (PCA/t-SNE)
+
+```bash
+python EDA/plots/p11_clip_embedding_eda.py \
+    --base_path /path/to/curvton/dataset_ultimate \
+    --out_dir figures/clip_embeddings \
+    --sample_ratio 0.2 \
+    --device cuda
+```
+
+### General EDA (VITON-HD, DressCode, etc.)
+
+```bash
+python EDA/run_eda.py \
+    --config configs/eda_datasets.yaml \
+    --out_dir figures/eda
+```
 
 ---
 
-## Quick Start
+## 📈 Computing Pretrained Metrics
 
-### 1. Smoke-test (no dataset)
+### CURVTON Dataset
+
 ```bash
-python demo_synthetic.py
+python pretrained_metrics/compute_curvton_metrics.py \
+    --base_path /path/to/curvton/dataset_ultimate \
+    --out_dir results/curvton_metrics \
+    --sample_ratio 1.0
 ```
 
-### 2. Single dataset
+### Other Datasets
+
+```bash
+# VITON-HD
+bash pretrained_metrics/sh/compute_vitonhd.sh
+
+# DressCode
+bash pretrained_metrics/sh/compute_dresscode.sh
+
+# LAION-RVS-Fashion
+bash pretrained_metrics/sh/compute_laion.sh
+```
+
+---
+
+## 🎯 Evaluation
+
+### Standard Evaluation (with ground truth)
+
 ```bash
 python evaluate.py \
-    --dataset viton \
-    --root /path/to/VITON \
-    --pred_dir /path/to/your_model_outputs \
+    --dataset viton_hd \
+    --root /path/to/vitonhd \
+    --pred_dir /path/to/predictions \
     --output_dir ./results \
     --batch_size 8 \
     --device cuda
 ```
 
-### 3. All 10 datasets at once
+### Multi-dataset Evaluation
+
 ```bash
-# 1. Edit configs/all_datasets.yaml — fill in root / pred_dir for each dataset
-# 2. Run:
+# Edit configs/all_datasets.yaml with your paths
 python evaluate.py --config configs/all_datasets.yaml
 ```
 
-### 4. Skip heavy metrics
+### Skip Heavy Metrics
+
 ```bash
 python evaluate.py --config configs/all_datasets.yaml \
-    --no_vlm    # skip BLIP-2
+    --no_vlm    # skip VLM score
     --no_jepa   # skip JEPA
-    --no_pose   # skip HRNet pose
+    --no_pose   # skip pose error
+```
+
+### In-the-Wild Evaluation (no ground truth)
+
+```bash
+python on_the_wild_evaluation/run_evaluation.py \
+    --config configs/model2street.yaml \
+    --tryon_dir /path/to/tryon_results \
+    --person_dir /path/to/person_images \
+    --cloth_dir /path/to/cloth_images \
+    --out_dir results/wild_evaluation
 ```
 
 ---
 
-## Integrating Your Model
+## 🔍 VLM-based Evaluation
 
-By default, `evaluate.py` loads predictions from `--pred_dir` (PNG/JPGs named by sample ID).
-
-To run your model **inline**, edit the `_run_model()` function in `evaluate.py`:
+The VLM evaluator uses **Qwen3-VL-32B-Instruct** for multi-image evaluation:
 
 ```python
-# evaluate.py  →  _run_model()
-def _run_model(cloth: torch.Tensor, person: torch.Tensor) -> torch.Tensor:
-    # Replace this with your model forward pass:
-    return my_tryon_model(person, cloth)
+from metrics.vlm_score import VLMScoreMetric
+
+metric = VLMScoreMetric(device="cuda")
+
+# Evaluate with all three images (recommended)
+results = metric.compute_batch(
+    tryon_images,           # Generated try-on results
+    person_images=person,   # Original person images
+    cloth_images=cloth,     # Original garment images
+)
+# Returns: [{'vlm_score': 0.85, 'reason': '...'}, ...]
 ```
+
+### VLM Evaluation Criteria
+1. **Photorealism** - Fabric texture, wrinkles, shading
+2. **Lighting Consistency** - Shadows, highlights alignment
+3. **Color/Intensity Matching** - Exposure consistency
+4. **Seamless Blending** - No artifacts, halos
+5. **Body Alignment** - Pose and geometry
+6. **Occlusion Handling** - Arms, hair, objects
+7. **Global Scene Consistency** - Natural integration
 
 ---
 
-## Output
+## 📊 EDA Output
 
-Results are written to `--output_dir` (default: `./results/`):
-- `metrics_YYYYMMDD_HHMMSS.json` — full results per dataset
-- `metrics_YYYYMMDD_HHMMSS.csv`  — tabular summary
+The EDA pipeline generates publication-quality figures:
+
+| Plot | Description | Image Used |
+|------|-------------|------------|
+| `pose/` | Pose distribution (UMAP, joint angles) | initial_person_image |
+| `occlusion/` | Garment occlusion analysis | initial_person_image |
+| `background/` | Background complexity (entropy, objects) | initial_person_image |
+| `illumination/` | Lighting analysis (luminance, gradients) | initial_person_image |
+| `body_shape/` | Body shape distribution (SMPL betas) | initial_person_image |
+| `appearance/` | Face/identity diversity | initial_person_image |
+| `garment/` | Garment texture diversity (CLIP) | cloth_image |
+| `clip_embeddings/` | CLIP image/text PCA/t-SNE | cloth_image |
 
 ---
 
-## Dataset Folder Structures
+## 🎨 Publication-Quality Figures
 
-### VITON / CP-VTON / ACGPN
+All figures are styled for ECCV/CVPR/ICCV/NeurIPS:
+- **PDF**: 600 DPI, Type 42 fonts (editable in Illustrator)
+- **PNG**: 150 DPI preview
+- **Colorblind-friendly** palette
+- **Single-column**: 3.25" width
+- **Double-column**: 6.875" width
+
+---
+
+## 📦 Dataset Structures
+
+### CURVTON Dataset
 ```
-<root>/
-  test/
-    image/          ← person images
-    cloth/          ← garment images
-    image-parse/    ← segmentation masks (optional)
-  test_pairs.txt    ← "person_img.jpg cloth_img.jpg"
+dataset_ultimate/
+├── easy/
+│   ├── female/
+│   │   ├── cloth_image/
+│   │   ├── initial_person_image/
+│   │   └── tryon_image/
+│   └── male/
+├── medium/
+└── hard/
 ```
 
-### VITON-HD / HR-VTON
+### VITON-HD
 ```
-<root>/
-  test/
-    image/
-    cloth/
-    agnostic-mask/  ← binary body mask
-  test_pairs.txt
+vitonhd/
+├── train/
+│   ├── image/
+│   ├── cloth/
+│   └── ...
+└── test/
+    ├── image/
+    ├── cloth/
+    └── agnostic-mask/
 ```
 
 ### DressCode
 ```
-<root>/
-  upper_body/       ← (or lower_body / dresses)
-    images/         ← person (id_0.jpg) + gt (id_1.jpg)
-    clothes/        ← garment (id_1.jpg)
-    label_maps/     ← optional segmentation
-  upper_body_pairs_test.txt
-```
-
-### DeepFashion-TryOn
-```
-<root>/
-  test/
-    image/  cloth/  gt/  mask/
-  test_pairs.txt  "person cloth gt"
-```
-
-### LaDI-VTON
-```
-<root>/
-  test/  images/  clothes/  gt/  masks/
-  test_pairs.txt
+dresscode/
+├── upper_body/
+│   ├── images/
+│   ├── clothes/
+│   └── label_maps/
+├── lower_body/
+└── dresses/
 ```
 
 ---
 
-## Notes
+## 📋 Configuration Files
 
-- **Masked SSIM**: uses the per-sample `mask` from the dataloader. If no mask file exists, the full image is used (white mask).
-- **Pose Error fallback**: if `timm` HRNet inference fails, a mean-pixel-displacement proxy is used and labelled accordingly.  
-- **VLM Score fallback**: if BLIP-2 fails to load (GPU memory / missing weights), each image gets a neutral score of 5.0.
-- **JEPA**: uses ViT-B/16 as a surrogate context/target encoder with a random linear predictor. Swap in official I-JEPA weights for research-grade results.
+| Config | Description |
+|--------|-------------|
+| `all_datasets.yaml` | All supported datasets |
+| `benchmark_test.yaml` | Standard benchmark evaluation |
+| `curvton_eda.yaml` | CURVTON EDA settings |
+| `model2model.yaml` | Model-to-model comparison |
+| `model2street.yaml` | Model-to-street evaluation |
+| `shop2model.yaml` | Shop-to-model evaluation |
+| `training_eval.yaml` | Training-time evaluation |
+
+---
+
+## 🔧 Troubleshooting
+
+### CUDA Out of Memory
+```bash
+# Reduce batch size
+python EDA/run_curvton_eda.py --sample_ratio 0.1
+
+# Use CPU for VLM
+python evaluate.py --device cpu
+```
+
+### Missing CLIP
+```bash
+pip install openai-clip
+# or
+pip install open-clip-torch
+```
+
+### Flash Attention Issues
+```bash
+# The code will fall back to standard attention automatically
+pip install transformers --upgrade
+```
+
+---
+
+## 📄 License
+
+This project is for research purposes.
+
+## 📧 Contact
+
+For questions, please open an issue on GitHub.
