@@ -370,40 +370,39 @@ class _SegBackend:
     def _mask2former_masks(self, imgs: torch.Tensor, H: int, W: int):
         """
         Run Mask2Former (COCO panoptic) for comprehensive object segmentation.
-        Detects 133 object classes including people, bags, furniture, vehicles.
+        Batched: single forward pass over the entire batch.
         """
         B = imgs.shape[0]
-        
-        # Initialize output masks
-        garment = torch.zeros((B, H, W), dtype=torch.bool)
-        body_parts = torch.zeros((B, H, W), dtype=torch.bool)
+
+        garment     = torch.zeros((B, H, W), dtype=torch.bool)
+        body_parts  = torch.zeros((B, H, W), dtype=torch.bool)
         accessories = torch.zeros((B, H, W), dtype=torch.bool)
         carried_obj = torch.zeros((B, H, W), dtype=torch.bool)
         environment = torch.zeros((B, H, W), dtype=torch.bool)
-        other_mask = torch.zeros((B, H, W), dtype=torch.bool)
-        
-        # Process each image
+        other_mask  = torch.zeros((B, H, W), dtype=torch.bool)
+
+        # PIL conversion on CPU (all at once)
         pils = [TF.to_pil_image(img.clamp(0, 1).cpu()).convert("RGB") for img in imgs]
-        
-        for i, pil in enumerate(pils):
-            inputs = self._mask2former_processor(images=pil, return_tensors="pt").to(self.device)
-            outputs = self._mask2former_model(**inputs)
-            
-            # Post-process to get panoptic segmentation
-            result = self._mask2former_processor.post_process_panoptic_segmentation(
-                outputs, target_sizes=[(H, W)]
-            )[0]
-            
-            seg_map = result["segmentation"].cpu()  # (H, W) with segment IDs
+
+        # Batched processor + single forward pass
+        inputs  = self._mask2former_processor(images=pils, return_tensors="pt").to(self.device)
+        outputs = self._mask2former_model(**inputs)
+
+        # Batched post-processing (returns list[dict], one per image)
+        results = self._mask2former_processor.post_process_panoptic_segmentation(
+            outputs, target_sizes=[(H, W)] * B
+        )
+
+        # Classify segments per image (cheap CPU work)
+        for i, result in enumerate(results):
+            seg_map  = result["segmentation"].cpu()
             segments = result["segments_info"]
-            
-            # Map segments to occlusion categories
+
             for seg_info in segments:
-                seg_id = seg_info["id"]
+                seg_id   = seg_info["id"]
                 label_id = seg_info["label_id"]
-                mask = (seg_map == seg_id)
-                
-                # Classify by COCO category
+                mask     = (seg_map == seg_id)
+
                 if label_id in self._COCO_BAGS:
                     carried_obj[i] |= mask
                 elif label_id in self._COCO_FURNITURE:
@@ -414,39 +413,26 @@ class _SegBackend:
                     environment[i] |= mask
                 elif label_id in self._COCO_SPORTS:
                     carried_obj[i] |= mask
-                elif label_id == 0:  # person
-                    # This could be another person or the main subject
-                    # For now, count as potential environment occlusion
-                    # (main person detection is handled separately)
+                elif label_id == 0:
                     pass
                 else:
                     other_mask[i] |= mask
-        
-        # For body parts and garment, we still need human parsing
-        # Run Segformer if available for detailed body part segmentation
+
         if self._model is not None:
             sf_masks = self._segformer_masks_internal(imgs, H, W)
-            garment = sf_masks["garment"]
+            garment    = sf_masks["garment"]
             body_parts = sf_masks["body_parts"]
             accessories |= sf_masks["accessories"]
-        
-        # Legacy compatibility
+
         arms = body_parts.clone()
         hair = torch.zeros((B, H, W), dtype=torch.bool)
-        
-        # Combine all non-garment as "other" for legacy
         other_combined = body_parts | accessories | carried_obj | environment | other_mask
-        
+
         return {
-            "garment": garment,
-            "body_parts": body_parts,
-            "accessories": accessories,
-            "carried_obj": carried_obj,
-            "environment": environment,
-            "other": other_combined,
-            # Legacy keys
-            "arms": arms,
-            "hair": hair,
+            "garment": garment, "body_parts": body_parts,
+            "accessories": accessories, "carried_obj": carried_obj,
+            "environment": environment, "other": other_combined,
+            "arms": arms, "hair": hair,
         }
 
     # --------------------------------------------------------------------- #

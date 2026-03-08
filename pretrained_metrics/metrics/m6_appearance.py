@@ -67,10 +67,25 @@ class _FaceEmbedder:
         try:
             import insightface
             from insightface.app import FaceAnalysis
-            self._app = FaceAnalysis(providers=["CPUExecutionProvider"])
-            self._app.prepare(ctx_id=-1, det_size=(160, 160))
+            # Use GPU if available (onnxruntime-gpu), fall back to CPU
+            try:
+                import onnxruntime as ort
+                available = ort.get_available_providers()
+            except ImportError:
+                available = []
+            if "CUDAExecutionProvider" in available:
+                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                ctx_id = 0
+            else:
+                providers = ["CPUExecutionProvider"]
+                ctx_id = -1
+                print("[AppearanceMetric] WARNING: onnxruntime-gpu not installed! "
+                      "InsightFace will run on CPU (very slow). "
+                      "Install with: pip install onnxruntime-gpu")
+            self._app = FaceAnalysis(providers=providers)
+            self._app.prepare(ctx_id=ctx_id, det_size=(640, 640))
             self._backend = "arcface"
-            print("[AppearanceMetric] Using InsightFace ArcFace.")
+            print(f"[AppearanceMetric] Using InsightFace ArcFace ({providers[0]}).")
             return
         except Exception as e:
             print(f"[AppearanceMetric] InsightFace unavailable ({e}).")
@@ -161,18 +176,6 @@ class _FaceEmbedder:
             else:
                 emb = np.zeros(512, dtype=np.float32)
             results.append(emb)
-        return np.stack(results, axis=0)
-
-    def _clip_embeddings(self, imgs: torch.Tensor) -> np.ndarray:
-        from PIL import Image
-        results = []
-        for i in range(imgs.shape[0]):
-            face_crop = self._crop_face_region(imgs[i])          # (3, H', W)
-            pil = TF.to_pil_image(face_crop.clamp(0, 1))
-            inp = self._clip_preprocess(pil).unsqueeze(0).to(self.device)
-            emb = self._clip_model.encode_image(inp)              # (1, 512)
-            emb = F.normalize(emb, dim=-1)
-            results.append(emb.squeeze(0).cpu().numpy())
         return np.stack(results, axis=0)
 
 

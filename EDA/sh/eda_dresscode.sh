@@ -2,12 +2,11 @@
 # eda_dresscode.sh
 # Run from the project root: bash EDA/sh/eda_dresscode.sh
 
-ROOT=${1:-"./dresscode"}
-BATCH_SIZE=${2:-16}
+BATCH_SIZE=${1:-16}
 
 python EDA/run_eda.py \
     --dataset dresscode \
-    --root "$ROOT" \
+    --root ./dresscode \
     --batch_size "$BATCH_SIZE" \
     --use_anish \
     --cache_dir "./eda_cache_anish" \

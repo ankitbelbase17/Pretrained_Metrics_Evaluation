@@ -25,6 +25,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Ellipse
 import seaborn as sns
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from plot_style import (
@@ -62,8 +63,11 @@ def plot_shape_pca(
     X = np.concatenate(mats, axis=0).astype(np.float32)
     X = np.nan_to_num(X)
 
+    # Scale the features so extreme outliers don't dominate the PCA
+    X_scaled = StandardScaler().fit_transform(X)
+
     pca = PCA(n_components=2, random_state=42)
-    Z   = pca.fit_transform(X)
+    Z   = pca.fit_transform(X_scaled)
     ev  = pca.explained_variance_ratio_ * 100
 
     fig, ax = plt.subplots(figsize=(4.5, 3.8))

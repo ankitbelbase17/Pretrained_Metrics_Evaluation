@@ -261,7 +261,7 @@ class PoseMetrics:
             }
 
         # 1A — Diversity
-        V   = np.stack(self._pose_vecs, axis=0)    # (N, D)
+        V   = np.stack(self._pose_vecs, axis=0).astype(np.float64)    # (N, D)
         D   = V.shape[1]
         mu  = V.mean(axis=0, keepdims=True)
         Vc  = V - mu

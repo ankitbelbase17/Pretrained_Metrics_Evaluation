@@ -151,27 +151,38 @@ class _ObjectDetector:
         person_masks : (B, H, W  )  bool
         Returns List[int] — number of background objects per image.
         """
-        counts = []
         B = imgs.shape[0]
 
         if self._backend == "detr":
             import torchvision.transforms.functional as TF
+
+            # Batch person-masking on CPU
+            imgs_masked = imgs.clone()
             for i in range(B):
-                # Zero-out person region so DETR focuses on background
-                img_masked = imgs[i].clone()
-                img_masked[:, person_masks[i]] = 0.0
-                pil = TF.to_pil_image(img_masked.clamp(0, 1).cpu()).convert("RGB")
+                imgs_masked[i, :, person_masks[i]] = 0.0
+
+            # PIL conversion (all at once)
+            pils = []
+            for i in range(B):
+                pil = TF.to_pil_image(imgs_masked[i].clamp(0, 1).cpu()).convert("RGB")
                 if pil.width < 32 or pil.height < 32:
                     pil = pil.resize((224, 224))
-                inputs = self._feature(
-                    images=pil,
-                    return_tensors="pt",
-                    input_data_format="channels_last",
-                ).to(self.device)
-                outs   = self._model(**inputs)
-                probs  = outs.logits.softmax(-1)[0, :, :-1]   # drop 'no-object'
-                conf   = probs.max(-1).values
-                n_obj  = int((conf > self.CONF_THRESHOLD).sum().item())
+                pils.append(pil)
+
+            # Batched DETR forward (single pass)
+            inputs = self._feature(
+                images=pils,
+                return_tensors="pt",
+                input_data_format="channels_last",
+            ).to(self.device)
+            outs = self._model(**inputs)
+
+            # Per-image confidence thresholding (cheap CPU indexing)
+            counts = []
+            for i in range(B):
+                probs = outs.logits.softmax(-1)[i, :, :-1]
+                conf  = probs.max(-1).values
+                n_obj = int((conf > self.CONF_THRESHOLD).sum().item())
                 counts.append(n_obj)
             return counts
 

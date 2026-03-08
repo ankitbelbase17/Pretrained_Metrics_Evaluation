@@ -155,6 +155,10 @@ def plot_eigenvalue_spectrum(
     for i, (name, E) in enumerate(datasets.items()):
         E = E.astype(np.float32)
         E = np.nan_to_num(E)
+        
+        # Scale: L2 normalize embeddings so standard scale variance doesn't explode the covariance matrix
+        E = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-12)
+        
         mu  = E.mean(0, keepdims=True)
         Ec  = E - mu
         
@@ -233,6 +237,7 @@ def plot_eigenvalue_spectrum(
     for i, (name, E) in enumerate(datasets.items()):
         E = E.astype(np.float32)
         E = np.nan_to_num(E)
+        E = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-12)
         mu = E.mean(0, keepdims=True)
         Ec = E - mu
         
