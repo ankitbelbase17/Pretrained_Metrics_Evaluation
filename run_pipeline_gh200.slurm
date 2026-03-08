@@ -25,7 +25,7 @@ conda activate CURVTON7
 export TOKENIZERS_PARALLELISM=false
 
 # ── USER MUST CONFIGURE THIS ──────────────────────────────────────────────────
-BASE_PATH="/path/to/dataset_ultimate"  # Path to the actual image dataset folder
+BASE_PATH="/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate"
 # ──────────────────────────────────────────────────────────────────────────────
 
 mkdir -p logs
