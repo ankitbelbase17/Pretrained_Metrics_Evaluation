@@ -1,13 +1,15 @@
-#!/bin/bash
+#!/bin/bash --login
 #SBATCH --job-name=curvton_pipeline
+#SBATCH --account=a168
+#SBATCH --partition=normal
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=300G
 #SBATCH --time=07:00:00
-#SBATCH --output=logs/pipeline_%j.log
-#SBATCH --error=logs/pipeline_%j_error.log
+#SBATCH --output=/users/dbartaula/logs/pipeline_%j.log
+#SBATCH --error=/users/dbartaula/logs/pipeline_%j_error.log
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Unified Pipeline for CURVTON: Pretrained Metrics + EDA
