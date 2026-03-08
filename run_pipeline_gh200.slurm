@@ -16,12 +16,10 @@
 # Hardware: 2 Nodes x 4 GH200 GPUs (8 GPUs total)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Setup Environment
-module load cuda/12.1
-module load python/3.10
-
-# NOTE: Uncomment and set your own virtual environment if necessary
-# source venv/bin/activate
+# ── WARNING: YOU MUST ACTIVATE YOUR PYTHON ENVIRONMENT HERE ──
+source /iopsstor/scratch/cscs/dbartaula/miniforge3/etc/profile.d/conda.sh
+conda activate CURVTON7
+# ─────────────────────────────────────────────────────────────
 
 # Disable tokenizers parallelism warning
 export TOKENIZERS_PARALLELISM=false
