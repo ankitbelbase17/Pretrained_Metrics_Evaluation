@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=300G
 #SBATCH --time=07:00:00
-#SBATCH --output=logs/pipeline_%j.out
-#SBATCH --error=logs/pipeline_%j.err
+#SBATCH --output=logs/pipeline_%j.log
+#SBATCH --error=logs/pipeline_%j_error.log
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Unified Pipeline for CURVTON: Pretrained Metrics + EDA
