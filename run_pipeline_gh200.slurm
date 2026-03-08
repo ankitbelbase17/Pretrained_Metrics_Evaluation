@@ -2,18 +2,18 @@
 #SBATCH --job-name=curvton_pipeline
 #SBATCH --account=a168
 #SBATCH --partition=normal
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=300G
-#SBATCH --time=07:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/users/dbartaula/logs/pipeline_%j.log
 #SBATCH --error=/users/dbartaula/logs/pipeline_%j_error.log
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Unified Pipeline for CURVTON: Pretrained Metrics + EDA
-# Hardware: 2 Nodes x 4 GH200 GPUs (8 GPUs total)
+# Hardware: 1 Node x 4 GH200 GPUs (4 GPUs total)
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── WARNING: YOU MUST ACTIVATE YOUR PYTHON ENVIRONMENT HERE ──

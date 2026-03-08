@@ -72,8 +72,9 @@ def _setup_distributed():
             dist.init_process_group(backend="nccl")
         rank = int(os.environ["RANK"])
         world = int(os.environ["WORLD_SIZE"])
-        torch.cuda.set_device(rank)
-        device = f"cuda:{rank}"
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+        device = f"cuda:{local_rank}"
     else:
         rank, world = 0, 1
         device = "cuda" if torch.cuda.is_available() else "cpu"
