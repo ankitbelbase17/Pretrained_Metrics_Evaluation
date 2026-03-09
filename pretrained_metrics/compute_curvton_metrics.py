@@ -268,7 +268,7 @@ def compute_metrics_for_split(
 
     for label, cls, kwargs, use_cloth in metric_specs:
         # Check for existing checkpoint (crash recovery)
-        ckpt_file = out_path / f"_ckpt_{split_name}_{label}.json"
+        ckpt_file = out_path / f"curvton_metrics_{dataset_name}_{split_name}_{label}_ckpt.json"
         if rank == 0 and ckpt_file.exists():
             try:
                 with open(ckpt_file, "r") as f:
@@ -305,7 +305,7 @@ def compute_metrics_for_split(
 
     # Save per-split results
     if rank == 0:
-        split_file = out_path / f"_split_{split_name}.json"
+        split_file = out_path / f"curvton_metrics_{dataset_name}_{split_name}_split.json"
         with open(split_file, "w") as f:
             json.dump(results, f, indent=2, default=str)
         if verbose:
@@ -467,7 +467,7 @@ def compute_curvton_metrics(
         }
 
         ratio_pct = int(sample_ratio * 100)
-        output_file = out_path / f"curvton_metrics_{ratio_pct}pct.json"
+        output_file = out_path / f"curvton_metrics_{dataset_name}_{split_name}_{ratio_pct}pct.json"
         with open(output_file, "w") as f:
             json.dump(output, f, indent=2, default=str)
 
@@ -516,10 +516,10 @@ def compute_multi_ratio_metrics(
         all_ratio_results[f"{ratio_pct}%"] = results
 
     if rank == 0:
-        summary_file = Path(out_dir) / "curvton_metrics_all_ratios.json"
+        summary_file = Path(out_dir) / f"curvton_metrics_{dataset_name}_all_ratios.json"
         with open(summary_file, "w") as f:
             json.dump({
-                "dataset": "CURVTON",
+                "dataset": dataset_name,
                 "ratios": [f"{int(r*100)}%" for r in ratios],
                 "results": all_ratio_results,
                 "timestamp": datetime.now().isoformat(),
