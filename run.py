@@ -39,7 +39,9 @@ import os
 import subprocess
 import sys
 import time
+import yaml
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Default dataset paths (edit these or override via CLI)
@@ -68,12 +70,21 @@ def _banner(phase: int, total: int, title: str):
     print("=" * 70)
 
 
-def _run_python(script: str, args: list, desc: str) -> bool:
-    """Run a Python script in a subprocess, return True on success."""
-    cmd = [sys.executable, script] + args
-    print(f"\n  → {' '.join(cmd)}\n")
+def _run_python(script: str, args: list, desc: str, gpus: int = 1, gpu_id: int = None) -> bool:
+    """Run a Python script. If gpu_id is provided, runs on that specific GPU."""
+    # Special case: CurvTON EDA natively supports torchrun
+    if gpus > 1 and "run_curvton_eda" in script:
+        cmd = ["torchrun", f"--nproc_per_node={gpus}", script] + args
+        env = os.environ.copy()
+    else:
+        cmd = [sys.executable, script] + args
+        env = os.environ.copy()
+        if gpu_id is not None:
+            env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        
+    print(f"\n  → [GPU {gpu_id if gpu_id is not None else 'ALL'}] {' '.join(cmd)}\n")
     t0 = time.time()
-    result = subprocess.run(cmd, cwd=str(Path(__file__).parent))
+    result = subprocess.run(cmd, env=env, cwd=str(Path(__file__).parent))
     elapsed = time.time() - t0
     if result.returncode != 0:
         print(f"  ✗ {desc} FAILED (exit code {result.returncode}, {elapsed:.1f}s)")
@@ -91,13 +102,48 @@ def phase1_pretrained_metrics(args):
     _banner(1, 4, "Pretrained Metrics — All Datasets (YAML config)")
 
     script = "pretrained_metrics/compute_pretrained_metrics.py"
-    cli_args = [
-        "--config", args.metrics_config,
-        "--output_dir", args.output_dir,
-        "--batch_size", str(args.batch_size),
-        "--num_workers", str(args.num_workers),
-    ]
-    return _run_python(script, cli_args, "Pretrained Metrics (all datasets)")
+    # ── Multi-GPU Dataset Parallelism ──
+    if args.gpus > 1:
+        print(f"\n  [Phase 1] Launching {args.gpus} datasets concurrently across GPUs...")
+        with open("configs/pretrained_metrics_datasets.yaml") as f:
+            cfg = yaml.safe_load(f)
+        datasets = cfg.get("datasets", [])
+        
+        all_ok = True
+        with ThreadPoolExecutor(max_workers=args.gpus) as executor:
+            futures = []
+            for i, ds in enumerate(datasets):
+                ds_name = ds["name"]
+                ds_args = [
+                    "--dataset", ds_name,
+                    "--output_dir", str(Path(args.output_dir) / "results" / "unified"),
+                    "--batch_size", str(args.batch_size),
+                    "--num_workers", str(args.num_workers),
+                ]
+                # Modulo GPU assignment
+                gpu_id = i % args.gpus
+                futures.append(executor.submit(_run_python, script, ds_args, f"Metrics ({ds_name})", 1, gpu_id))
+            
+            for f in as_completed(futures):
+                if not f.result():
+                    all_ok = False
+        
+        # After parallel extraction, we must run the aggregation/normalization script once
+        if all_ok:
+            print("\n  [Phase 1] All datasets completed. Aggregating Unified Complexity Index...")
+            return _run_python(script, [
+                "--config", "configs/pretrained_metrics_datasets.yaml",
+                "--output_dir", str(Path(args.output_dir) / "results" / "unified"),
+            ], "Metrics Aggregation", gpus=1)
+        return all_ok
+    else:
+        cli_args = [
+            "--config", "configs/pretrained_metrics_datasets.yaml",
+            "--output_dir", str(Path(args.output_dir) / "results" / "unified"),
+            "--batch_size", str(args.batch_size),
+            "--num_workers", str(args.num_workers),
+        ]
+        return _run_python(script, cli_args, "Pretrained Metrics (all datasets)", gpus=1)
 
 
 def phase2_curvton_eda(args):
@@ -111,7 +157,7 @@ def phase2_curvton_eda(args):
         "--cache_dir", str(Path(args.output_dir) / "eda_cache" / "curvton"),
         "--sample_ratio", str(args.sample_ratio),
     ]
-    return _run_python(script, cli_args, "CurvTON EDA (difficulty splits)")
+    return _run_python(script, cli_args, "CurvTON EDA (difficulty splits)", gpus=args.gpus)
 
 
 def phase3_baseline_eda(args):
@@ -126,24 +172,45 @@ def phase3_baseline_eda(args):
 
     script = "EDA/run_eda.py"
     all_ok = True
+    
+    if args.gpus > 1:
+        print(f"\n  [Phase 3] Launching baseline EDAs concurrently across {args.gpus} GPUs...")
+        with ThreadPoolExecutor(max_workers=args.gpus) as executor:
+            futures = []
+            for i, (ds_name, ds_root, display_name) in enumerate(baselines):
+                if not ds_root: continue
+                cli_args = [
+                    "--dataset", ds_name,
+                    "--root", ds_root,
+                    "--batch_size", str(args.batch_size),
+                    "--num_workers", str(args.num_workers),
+                    "--cache_dir", str(Path(args.output_dir) / "eda_cache" / ds_name),
+                    "--out_dir", str(Path(args.output_dir) / "plots"),
+                ]
+                gpu_id = i % args.gpus
+                futures.append(executor.submit(_run_python, script, cli_args, f"EDA ({display_name})", 1, gpu_id))
+            
+            for f in as_completed(futures):
+                if not f.result():
+                    all_ok = False
+    else:
+        for ds_name, ds_root, display_name in baselines:
+            if not ds_root:
+                print(f"\n  [SKIP] {display_name} — no root path provided")
+                continue
 
-    for ds_name, ds_root, display_name in baselines:
-        if not ds_root:
-            print(f"\n  [SKIP] {display_name} — no root path provided")
-            continue
-
-        print(f"\n  ── {display_name} ──")
-        cli_args = [
-            "--dataset", ds_name,
-            "--root", ds_root,
-            "--batch_size", str(args.batch_size),
-            "--num_workers", str(args.num_workers),
-            "--cache_dir", str(Path(args.output_dir) / "eda_cache" / ds_name),
-            "--out_dir", str(Path(args.output_dir) / "plots"),
-        ]
-        ok = _run_python(script, cli_args, f"EDA ({display_name})")
-        if not ok:
-            all_ok = False
+            print(f"\n  ── {display_name} ──")
+            cli_args = [
+                "--dataset", ds_name,
+                "--root", ds_root,
+                "--batch_size", str(args.batch_size),
+                "--num_workers", str(args.num_workers),
+                "--cache_dir", str(Path(args.output_dir) / "eda_cache" / ds_name),
+                "--out_dir", str(Path(args.output_dir) / "plots"),
+            ]
+            ok = _run_python(script, cli_args, f"EDA ({display_name})", gpus=1)
+            if not ok:
+                all_ok = False
 
     return all_ok
 
@@ -300,6 +367,8 @@ def parse_args():
     # ── Processing ────────────────────────────────────────────────────────
     p.add_argument("--batch_size",   type=int, default=BATCH_SIZE)
     p.add_argument("--num_workers",  type=int, default=NUM_WORKERS)
+    p.add_argument("--gpus", type=int, default=1,
+                   help="Number of GPUs to use for DataParallel processing (torchrun)")
     p.add_argument("--sample_ratio", type=float, default=SAMPLE_RATIO,
                    help="CurvTON EDA sample ratio (default: 0.25)")
 
@@ -338,6 +407,7 @@ def main():
     print(f"  DressCode root   : {args.dresscode_root}")
     print(f"  StreetTryOn root : {args.street_tryon_root}")
     print(f"  Batch size       : {args.batch_size}")
+    print(f"  GPUs (Parallel)  : {args.gpus}")
     print(f"  Sample ratio     : {args.sample_ratio}")
     print("=" * 70)
 
