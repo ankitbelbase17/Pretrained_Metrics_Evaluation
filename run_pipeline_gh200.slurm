@@ -16,10 +16,6 @@
 # Hardware: 1 Node x 4 GH200 GPUs
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── WARNING: YOU MUST ACTIVATE YOUR PYTHON ENVIRONMENT HERE ──
-source /iopsstor/scratch/cscs/dbartaula/miniforge3/etc/profile.d/conda.sh
-conda activate CURVTON7
-# ─────────────────────────────────────────────────────────────
 
 # Disable tokenizers parallelism warning
 export TOKENIZERS_PARALLELISM=false
