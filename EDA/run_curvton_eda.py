@@ -58,6 +58,7 @@ from EDA.plots.p2_occlusion_eda import plot_occlusion_histogram, plot_occlusion_
 from EDA.plots.p3_background_eda import plot_bg_entropy_histogram, plot_entropy_vs_objects
 from EDA.plots.p4_illumination_eda import plot_luminance_spectrum, plot_illumination_pca
 from EDA.plots.p5_body_shape_eda import plot_shape_pca, plot_shape_coefficient_histograms
+from EDA.plot_style import set_global_prefix
 from EDA.plots.p6_appearance_eda import plot_face_umap, plot_pairwise_distance_distribution
 from EDA.plots.p7_garment_eda import plot_garment_umap, plot_eigenvalue_spectrum
 from EDA.plots.p11_clip_embedding_eda import run_clip_embedding_eda
@@ -532,6 +533,8 @@ def run_curvton_eda(
     print("Generating EDA Plots")
     print("=" * 70)
     
+    set_global_prefix("curvton")
+    
     # --- 1. Pose EDA ---
     print("\n[1/7] Pose Distribution...")
     pose_data = {k: v["pose_vecs"] for k, v in all_features.items() if len(v.get("pose_vecs", [])) > 0}
@@ -611,7 +614,7 @@ def run_curvton_eda(
 
 def run_multi_ratio_eda(
     base_path: str,
-    out_dir: str = "figures/curvton",
+    out_dir: str = "plots/curvton",
     cache_dir: str = "eda_cache/curvton",
     ratios: List[float] = [0.1, 0.2, 0.3, 0.4, 0.5, 1.0],
     batch_size: int = _EXTRACT_BATCH_SIZE,
@@ -647,8 +650,8 @@ if __name__ == "__main__":
         help="Path to CURVTON dataset (dataset_ultimate or dataset_ultimate_test)"
     )
     parser.add_argument(
-        "--out_dir", type=str, default="figures/curvton",
-        help="Output directory for figures"
+        "--out_dir", type=str, default="plots/curvton",
+        help="Output directory for plots"
     )
     parser.add_argument(
         "--cache_dir", type=str, default="eda_cache/curvton",

@@ -25,7 +25,7 @@ conda activate CURVTON7
 export TOKENIZERS_PARALLELISM=false
 
 # ── USER MUST CONFIGURE THIS ──────────────────────────────────────────────────
-BASE_PATH="/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3/dataset_ultimate"
+BASE_PATH="/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate"
 # ──────────────────────────────────────────────────────────────────────────────
 
 mkdir -p logs
@@ -63,31 +63,6 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# 1. Pretrained Metrics (Computes over Ratios 10%, 20%, 40%, 50%, 100%)
-echo " "
-echo "================================================================="
-echo "[1/2] Launching Distributed Pretrained Metric Computation..."
-echo "================================================================="
-srun torchrun \
-    --nnodes=$SLURM_NNODES \
-    --nproc_per_node=$SLURM_GPUS_ON_NODE \
-    --rdzv_id=$SLURM_JOB_ID \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
-    pretrained_metrics/compute_curvton_metrics.py \
-    --base_path "$BASE_PATH" \
-    --multi_ratio \
-    --ratios 0.1 0.2 0.4 0.5 1.0 \
-    --batch_size 40 \
-    --num_workers 16
-
-if [ $? -ne 0 ]; then
-    echo "Error: Pretrained Metric Computation failed! Exiting."
-    exit 1
-fi
-
-
-
 
 # 2. EDA Pipeline (25% split for dataset_ultimate, test sets for others, and overlapped comparison plots)
 echo " "
@@ -102,7 +77,7 @@ srun torchrun \
     --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
     EDA/run_curvton_eda.py \
     --base_path "$BASE_PATH" \
-    --out_dir "figures/curvton" \
+    --out_dir "plots" \
     --cache_dir "eda_cache/curvton" \
     --sample_ratio 0.25 \
     --batch_size 40 \
@@ -119,10 +94,10 @@ echo "[2/3] Launching EDA for VITON-HD test set..."
 echo "================================================================="
 srun python EDA/run_eda.py \
     --dataset vitonhd \
-    --root ./zalando-hd-resized/test \
+    --root /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/viton_hd \
     --batch_size 40 \
     --cache_dir "eda_cache/vitonhd" \
-    --out_dir "figures/vitonhd"
+    --out_dir "plots"
 
 echo " "
 echo "================================================================="
@@ -130,10 +105,10 @@ echo "[3/3] Launching EDA for DressCode test set..."
 echo "================================================================="
 srun python EDA/run_eda.py \
     --dataset dresscode \
-    --root ./dresscode/test \
+    --root /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/dresscode \
     --batch_size 40 \
     --cache_dir "eda_cache/dresscode" \
-    --out_dir "figures/dresscode"
+    --out_dir "plots"
 
 echo " "
 echo "================================================================="
@@ -141,10 +116,10 @@ echo "[4/4] Launching EDA for StreetTryOn test set..."
 echo "================================================================="
 srun python EDA/run_eda.py \
     --dataset street_tryon \
-    --root ./street_tryon/test \
+    --root /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/street_tryon \
     --batch_size 40 \
     --cache_dir "eda_cache/street_tryon" \
-    --out_dir "figures/street_tryon"
+    --out_dir "plots"
 
 # Overlapped comparison plots (using cached features)
 echo " "
@@ -155,11 +130,11 @@ python EDA/run_eda.py \
     --figs_only \
     --cache_dir "eda_cache/curvton" "eda_cache/vitonhd" "eda_cache/dresscode" "eda_cache/street_tryon" \
     --labels "dataset_ultimate" "vitonhd" "dresscode" "street_tryon" \
-    --out_dir "figures/comparison"
+    --out_dir "plots"
 
 echo "================================================================="
 echo "Pipeline Execution Completed Successfully!"
 echo "Outputs:"
 echo " - Metrics JSONs: results/unified/"
-echo " - EDA Plots    : figures/curvton/"
+echo " - EDA Plots    : plots/"
 echo "================================================================="

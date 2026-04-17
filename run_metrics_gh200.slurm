@@ -42,8 +42,6 @@ srun torchrun --nproc_per_node=$SLURM_GPUS_ON_NODE \
     pretrained_metrics/compute_curvton_metrics.py \
     --base_path "$BASE_PATH" \
     --out_dir "$OUT_DIR" \
-    --multi_ratio \
-    --ratios 0.1 0.2 0.3 0.4 1.0 \
     --difficulties easy medium hard \
     --batch_size $BATCH_SIZE \
     --num_workers $NUM_WORKERS

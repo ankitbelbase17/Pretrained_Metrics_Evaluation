@@ -280,31 +280,111 @@ class UnifiedComplexityIndex:
         return out
 
     # ------------------------------------------------------------------ #
+    def get_comprehensive_results(self, scores: List[Dict]) -> Dict:
+        """
+        Return a comprehensive dict with raw, normalized metrics, and
+        all normalization parameters — suitable for JSON serialization.
+
+        Structure:
+            normalization_parameters : baselines (μ, σ), temperatures (τ), weights
+            metric_definitions      : ordered list of metric keys and labels
+            datasets                : per-dataset raw + normalized + sub-metrics
+        """
+        temps = scores[0].get("temperatures", {}) if scores else {}
+
+        results = {
+            "normalization_parameters": {
+                "description": (
+                    "VITON-HD baselines used for z-score normalization. "
+                    "z = (raw - mu) / sigma, then sigmoid(z / tau) maps to (0,1). "
+                    "Final score = 100 * weighted_avg(sigmoid_scores)."
+                ),
+                "baselines_mu": {k: self._mu.get(k, 0.0) for k, _ in METRIC_KEYS},
+                "baselines_sigma": {k: self._sig.get(k, 1.0) for k, _ in METRIC_KEYS},
+                "temperatures_tau": dict(temps),
+                "sigmoid_target": self._target,
+                "weights": {k: self._w.get(k, 0.0) for k, _ in METRIC_KEYS},
+            },
+            "metric_definitions": [
+                {"key": mk, "label": label} for mk, label in METRIC_KEYS
+            ],
+            "datasets": [],
+        }
+
+        for entry in scores:
+            ds_entry = {
+                "dataset": entry["dataset"],
+                "unified_complexity_score": entry["unified_score"],
+                "per_metric": {},
+                "all_raw_sub_metrics": {
+                    k: (v if not _isnan(v) else None)
+                    for k, v in entry["raw_metrics"].items()
+                    if k not in _MK_SET and k != "n_samples"
+                },
+                "n_samples": entry["raw_metrics"].get("n_samples", 0),
+            }
+            if "dresscode_category" in entry:
+                ds_entry["dresscode_category"] = entry["dresscode_category"]
+
+            for mk, label in METRIC_KEYS:
+                raw  = entry["raw_metrics"].get(mk, float("nan"))
+                z    = entry["z_scores"].get(mk, float("nan"))
+                norm = entry["normalised_metrics"].get(mk, float("nan"))
+
+                ds_entry["per_metric"][mk] = {
+                    "label": label,
+                    "raw_value": raw if not _isnan(raw) else None,
+                    "z_score": z if not _isnan(z) else None,
+                    "normalized_0_1": norm if not _isnan(norm) else None,
+                    "baseline_mu": self._mu.get(mk, 0.0),
+                    "baseline_sigma": self._sig.get(mk, 1.0),
+                    "temperature_tau": temps.get(mk, 1.0),
+                }
+
+            results["datasets"].append(ds_entry)
+
+        return results
+
+    # ------------------------------------------------------------------ #
     def print_report(self, scores: List[Dict]):
-        """Pretty-print the unified complexity report."""
-        W = 85
+        """Pretty-print the unified complexity report with normalization details."""
+        W = 105
         print("\n" + "═" * W)
         print(f"  {'UNIFIED DATASET COMPLEXITY INDEX':^{W-4}}")
         print("═" * W)
+
+        # ── Normalization baselines ────────────────────────────────────────
+        temps = scores[0].get("temperatures", {}) if scores else {}
+        print(f"\n  Normalization Baselines (VITON-HD reference):")
+        print(f"    {'Metric':<35} {'μ (baseline)':>14} {'σ (scale)':>12} {'τ (temp)':>12}")
+        print(f"    {'─'*35} {'─'*14} {'─'*12} {'─'*12}")
+        for mk, label in METRIC_KEYS:
+            mu  = self._mu.get(mk, 0.0)
+            sig = self._sig.get(mk, 1.0)
+            tau = temps.get(mk, 1.0)
+            print(f"    {label:<35} {mu:>14.4f} {sig:>12.4f} {tau:>12.4f}")
+
+        # ── Per-dataset results ────────────────────────────────────────────
         for d in scores:
             ds_label = d['dataset'].upper()
             if 'dresscode_category' in d:
                 ds_label = f"{ds_label} [{d['dresscode_category']}]"
             print(f"\n  ► {ds_label}")
-            print(f"    {'Metric':<35} {'Raw':>12}  {'z-score':>10}  {'Score₀₋₁':>10}")
-            print(f"    {'─'*35} {'─'*12}  {'─'*10}  {'─'*10}")
+            print(f"    {'Metric':<35} {'Raw (unnorm.)':>14}  {'z-score':>10}  {'τ':>8}  {'Score₀₋₁':>10}")
+            print(f"    {'─'*35} {'─'*14}  {'─'*10}  {'─'*8}  {'─'*10}")
 
             for mk, label in METRIC_KEYS:
                 raw = d["raw_metrics"].get(mk, float("nan"))
                 z   = d["z_scores"].get(mk, float("nan"))
                 s   = d["normalised_metrics"].get(mk, float("nan"))
+                tau = temps.get(mk, 1.0)
                 print(
-                    f"    {label:<35} {_f(raw):>12}  {_f(z):>10}  {_f(s, signed=False):>10}"
+                    f"    {label:<35} {_f(raw):>14}  {_f(z):>10}  {tau:>8.2f}  {_f(s, signed=False):>10}"
                 )
 
-            print(f"    {'─'*71}")
+            print(f"    {'─'*85}")
             score_str = _f(d['unified_score'], signed=False)
-            print(f"    {'Final Unified Score (0–100)':<35} {'':>12}  {'':>10}  {score_str:>10}")
+            print(f"    {'OVERALL COMPLEXITY SCORE (0–100)':<35} {'':>14}  {'':>10}  {'':>8}  {score_str:>10}")
 
             # ── Detailed sub-metrics ──────────────────────────────────────
             other_keys = sorted(

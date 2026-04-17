@@ -58,6 +58,7 @@ sys.path.insert(0, str(_HERE))               # EDA/
 sys.path.insert(0, str(_HERE.parent))        # workspace root
 
 # ── plot modules ────────────────────────────────────────────────────────────
+from plot_style import set_global_prefix
 from plots.p1_pose_eda        import plot_pose_umap, plot_joint_angle_distributions
 from plots.p2_occlusion_eda   import plot_occlusion_histogram, plot_occlusion_heatmap
 from plots.p3_background_eda  import plot_bg_entropy_histogram, plot_entropy_vs_objects
@@ -79,7 +80,7 @@ from plots.p9_vae_eda          import (
 
 def run_all_plots(
     all_data: Dict[str, dict],   # {dataset_name: loaded .npz dict}
-    out_root: str = "figures",
+    out_root: str = "plots",
     skip_figures: List[str] = None,
     no_pairplot: bool = False,
 ):
@@ -241,7 +242,7 @@ def _parse():
     p.add_argument("--skip_extraction", action="store_true",
                    help="Use cached .npz if it exists, else extract")
     p.add_argument("--cache_dir",       type=str,   default="./eda_cache")
-    p.add_argument("--out_dir",         type=str,   default="./figures")
+    p.add_argument("--out_dir",         type=str,   default="./plots")
     p.add_argument("--batch_size",      type=int,   default=8)
     p.add_argument("--num_workers",     type=int,   default=4)
     p.add_argument("--img_size",        type=int,   nargs=2,
@@ -414,6 +415,11 @@ def main():
     if not all_data:
         print("\n  [EDA] No data to plot.")
         return
+        
+    if args.dataset:
+        set_global_prefix(args.dataset)
+    elif args.labels and len(args.labels) > 1:
+        set_global_prefix("comparison")
 
     run_all_plots(all_data, out_root=args.out_dir,
                   skip_figures=args.skip, no_pairplot=args.no_pairplot)

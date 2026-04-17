@@ -331,18 +331,28 @@ def _write_checkpoint(checkpoint: dict, output_dir: str):
 # Save results
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _save(all_results: List[dict], output_dir: str, uci_scores: List[dict]):
+def _save(all_results: List[dict], output_dir: str, uci_scores: List[dict],
+          uci: "UnifiedComplexityIndex" = None):
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
 
-    # Main metrics
+    # ── Comprehensive JSON (raw + normalized + normalization params) ────────
+    if uci is not None:
+        comprehensive = uci.get_comprehensive_results(uci_scores)
+        comprehensive["timestamp"] = ts
+        comp_path = out / f"pretrained_metrics_comprehensive_{ts}.json"
+        with open(comp_path, "w") as f:
+            json.dump(comprehensive, f, indent=2, default=str)
+        print(f"\n  Comprehensive results (raw + normalized) saved → {comp_path}")
+
+    # ── Legacy JSON (backward compatible) ──────────────────────────────────
     json_path = out / f"pretrained_metrics_{ts}.json"
     with open(json_path, "w") as f:
-        json.dump({"metrics": all_results, "unified_scores": uci_scores}, f, indent=2)
-    print(f"\n  Results saved → {json_path}")
+        json.dump({"metrics": all_results, "unified_scores": uci_scores}, f, indent=2, default=str)
+    print(f"  Raw metrics + unified scores saved → {json_path}")
 
-    # CSV
+    # ── CSV with both raw and normalized columns ───────────────────────────
     try:
         import pandas as pd
         rows = []
@@ -350,11 +360,16 @@ def _save(all_results: List[dict], output_dir: str, uci_scores: List[dict]):
             row = {k: v for k, v in r.items()}
             if i < len(uci_scores):
                 row["unified_score"] = uci_scores[i].get("unified_score", float("nan"))
+                # Add normalized scores and z-scores as separate columns
+                for mk, norm_v in uci_scores[i].get("normalised_metrics", {}).items():
+                    row[f"{mk}_normalized"] = norm_v
+                for mk, z_v in uci_scores[i].get("z_scores", {}).items():
+                    row[f"{mk}_zscore"] = z_v
             rows.append(row)
         df = pd.DataFrame(rows)
         csv = out / f"pretrained_metrics_{ts}.csv"
         df.to_csv(csv, index=False)
-        print(f"  Results saved → {csv}")
+        print(f"  CSV (raw + normalized columns) saved → {csv}")
     except ImportError:
         pass
 
@@ -375,7 +390,7 @@ def _parse():
                    help="Dataset root directory.")
     p.add_argument("--dry_run",   action="store_true",
                    help="Smoke-test with random tensors (no dataset needed).")
-    p.add_argument("--output_dir",type=str, default="./results_pretrained")
+    p.add_argument("--output_dir",type=str, default=".")
     p.add_argument("--batch_size",type=int, default=16)
     p.add_argument("--num_workers",type=int,default=4)
     p.add_argument("--img_size",  type=int, nargs=2, default=[512, 384], metavar=("H","W"))
@@ -480,7 +495,7 @@ def main():
     uci.print_report(uci_scores)
 
     # ── Final consolidated save ───────────────────────────────────────────────
-    _save(all_results, output_dir, uci_scores)
+    _save(all_results, output_dir, uci_scores, uci)
 
 
 if __name__ == "__main__":

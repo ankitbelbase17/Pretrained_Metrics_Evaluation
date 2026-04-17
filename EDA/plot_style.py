@@ -556,6 +556,13 @@ def create_figure(
 # Save Helper (PDF + PNG for ECCV submission)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+GLOBAL_PREFIX = ""
+
+def set_global_prefix(prefix: str):
+    """Set a global prefix for all saved figures (e.g., 'vitonhd_')."""
+    global GLOBAL_PREFIX
+    GLOBAL_PREFIX = prefix
+
 def save_fig(
     fig: plt.Figure, 
     out_dir: Path, 
@@ -572,6 +579,9 @@ def save_fig(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     
+    if GLOBAL_PREFIX:
+        stem = f"{GLOBAL_PREFIX}_{stem}"
+        
     for ext in formats:
         p = out_dir / f"{stem}.{ext}"
         fig.savefig(

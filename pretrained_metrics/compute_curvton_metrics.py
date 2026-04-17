@@ -470,8 +470,23 @@ def compute_curvton_metrics(
         output_file = out_path / f"curvton_metrics_{dataset_name}_{split_name}_{ratio_pct}pct.json"
         with open(output_file, "w") as f:
             json.dump(output, f, indent=2, default=str)
-
         print(f"\n  Saved metrics to {output_file}")
+
+        # ── Comprehensive JSON (raw + normalized + normalization params) ───
+        comprehensive = uci.get_comprehensive_results(uci_scores)
+        comprehensive["timestamp"] = datetime.now().isoformat()
+        comprehensive["dataset_info"] = {
+            "name": "CURVTON",
+            "base_path": base_path,
+            "sample_ratio": sample_ratio,
+            "sample_counts": sample_counts,
+            "total_samples": sum(sample_counts.values()),
+        }
+        comp_file = out_path / f"curvton_metrics_comprehensive_{dataset_name}_{split_name}_{ratio_pct}pct.json"
+        with open(comp_file, "w") as f:
+            json.dump(comprehensive, f, indent=2, default=str)
+        print(f"  Comprehensive results (raw + normalized) saved → {comp_file}")
+
         uci.print_report(uci_scores)
 
         # Clean up checkpoint files

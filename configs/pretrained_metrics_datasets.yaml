@@ -23,42 +23,27 @@ defaults:
   run_garment: true
 
 datasets:
-  - name: viton
-    root: /data/VITON
+  - name: curvton_test
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test
+    split: test
+  - name: curvton_easy_test
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/easy
+    split: test
+  - name: curvton_medium_test
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/medium
+    split: test
+  - name: curvton_hard_test
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/hard
+    split: test
 
   - name: viton_hd
-    root: benchmark_datasets/viton_hd
-    img_size: [1024, 768]
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/viton_hd
+    split: test
 
   - name: dresscode
-    root: benchmark_datasets/dresscode
-    dresscode_category: upper_body
-
-  - name: mpv
-    root: /data/MPV
-
-  - name: deepfashion_tryon
-    root: /data/DeepFashion-TryOn
-
-  - name: acgpn
-    root: /data/ACGPN
-
-  - name: cp_vton
-    root: /data/CP-VTON
-
-  - name: hr_vton
-    root: /data/HR-VTON
-    img_size: [1024, 768]
-
-  - name: ladi_vton
-    root: /data/LaDI-VTON
-
-  - name: ovnet
-    root: /data/OVNet
-  - name: laion_fashion
-    root: benchmark_datasets/LAION-RVS-Fashion
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/dresscode
     split: test
 
   - name: street_tryon
-    root: benchmark_datasets/street_tryon
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/street_tryon
     split: test        # maps to validation/ internally (no explicit test split)
