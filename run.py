@@ -83,12 +83,25 @@ def _run_python(script: str, args: list, desc: str, gpus: int = 1, gpu_id: int =
             env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
         
     print(f"\n  → [GPU {gpu_id if gpu_id is not None else 'ALL'}] {' '.join(cmd)}\n")
+    print(f"  [DEBUG] Executing with Python: {sys.executable}")
+    
     t0 = time.time()
-    result = subprocess.run(cmd, env=env, cwd=str(Path(__file__).parent))
+    
+    # We use Popen so we can stream output live, but if it crashes we capture the error explicitly
+    process = subprocess.Popen(cmd, env=env, cwd=str(Path(__file__).parent))
+    process.wait()
+    
     elapsed = time.time() - t0
-    if result.returncode != 0:
-        print(f"  ✗ {desc} FAILED (exit code {result.returncode}, {elapsed:.1f}s)")
+    
+    if process.returncode != 0:
+        print(f"\n" + "!" * 80)
+        print(f"  [FATAL ERROR] {desc} FAILED (exit code {process.returncode}) after {elapsed:.1f}s.")
+        print(f"  [DEBUG TIP] Please check your SLURM error log (pipeline_unified_*_error.log) for the exact Python traceback!")
+        print(f"  [DEBUG TIP] Was the Conda environment successfully activated on the compute node?")
+        print(f"  [DEBUG TIP] Path used: {sys.executable}")
+        print("!" * 80 + "\n")
         return False
+        
     print(f"  ✓ {desc} completed ({elapsed:.1f}s)")
     return True
 
