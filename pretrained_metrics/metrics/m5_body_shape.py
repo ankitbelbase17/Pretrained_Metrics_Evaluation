@@ -80,8 +80,10 @@ class _ShapeExtractor:
             return
         if self._try_vit():
             return
-        print("[BodyShapeMetric] All backends failed. Using random stub.")
-        self._backend = "stub"
+        raise RuntimeError(
+            "[BodyShapeMetric] No valid backend available. "
+            "Install HMR2.0 (4D-Humans) or timm for ViT proxy."
+        )
 
     # ------------------------------------------------------------------ #
     def _try_hmr2(self) -> bool:
@@ -153,10 +155,7 @@ class _ShapeExtractor:
             feats = self._vit(x)              # (B, 768)
             betas = self._vit_proj(feats)     # (B, 10)
             return betas.cpu().numpy()
-
-        # Stub
-        rng = np.random.default_rng(42)
-        return rng.normal(0, 1, (B, self.SHAPE_DIM)).astype(np.float32)
+        raise RuntimeError("[BodyShapeMetric] No valid body-shape backend available.")
 
     # ------------------------------------------------------------------ #
     def _hmr2_forward(self, imgs: torch.Tensor) -> np.ndarray:

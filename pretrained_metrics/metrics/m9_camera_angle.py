@@ -122,8 +122,8 @@ class _CameraAngleBackend:
             self._backend = "vitpose"
             print("[CameraAngle] Using ViTPose for body orientation estimation.")
             return
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[CameraAngle] ViTPose not available: {e}")
 
         # Try alternative pose model
         try:
@@ -155,10 +155,10 @@ class _CameraAngleBackend:
             return
         except Exception as e:
             print(f"[CameraAngle] DINOv2 not available: {e}")
-
-        # ── Fallback: Heuristic ───────────────────────────────────────────────
-        self._backend = "heuristic"
-        print("[CameraAngle] Using heuristic-based viewpoint estimation.")
+        raise RuntimeError(
+            "[CameraAngle] No valid camera-angle backend available. "
+            "Install HMR2.0, ViTPose/KeypointRCNN, or DINOv2."
+        )
 
     # --------------------------------------------------------------------- #
     @torch.no_grad()
@@ -186,8 +186,7 @@ class _CameraAngleBackend:
             return self._keypointrcnn_angles(imgs, H, W)
         elif self._backend == "dino":
             return self._dino_angles(imgs, H, W)
-        else:
-            return self._heuristic_angles(imgs, H, W)
+        raise RuntimeError("[CameraAngle] No valid camera-angle backend available.")
 
     # --------------------------------------------------------------------- #
     def _hmr2_angles(self, imgs: torch.Tensor, H: int, W: int):
@@ -227,10 +226,7 @@ class _CameraAngleBackend:
             confidence = torch.ones(B, device=self.device)
 
         except Exception as e:
-            print(f"[CameraAngle] HMR2.0 inference failed: {e}")
-            azimuth = torch.zeros(B, device=self.device)
-            elevation = torch.zeros(B, device=self.device)
-            confidence = torch.zeros(B, device=self.device)
+            raise RuntimeError("[CameraAngle] HMR2.0 inference failed.") from e
 
         return {
             "azimuth": azimuth.cpu(),
@@ -298,10 +294,7 @@ class _CameraAngleBackend:
                 confidence = torch.zeros(B, device=self.device)
 
         except Exception as e:
-            print(f"[CameraAngle] ViTPose inference failed: {e}")
-            azimuth = torch.zeros(B, device=self.device)
-            elevation = torch.zeros(B, device=self.device)
-            confidence = torch.zeros(B, device=self.device)
+            raise RuntimeError("[CameraAngle] ViTPose inference failed.") from e
 
         return {
             "azimuth": azimuth.cpu(),
@@ -341,10 +334,7 @@ class _CameraAngleBackend:
                     confidence_list.append(0.0)
 
         except Exception as e:
-            print(f"[CameraAngle] KeypointRCNN inference failed: {e}")
-            azimuth_list = [0.0] * B
-            elevation_list = [0.0] * B
-            confidence_list = [0.0] * B
+            raise RuntimeError("[CameraAngle] KeypointRCNN inference failed.") from e
 
         return {
             "azimuth": torch.tensor(azimuth_list),
@@ -509,10 +499,7 @@ class _CameraAngleBackend:
             confidence = torch.ones(B, device=self.device) * 0.5  # Lower confidence for DINO
 
         except Exception as e:
-            print(f"[CameraAngle] DINO inference failed: {e}")
-            azimuth = torch.zeros(B, device=self.device)
-            elevation = torch.zeros(B, device=self.device)
-            confidence = torch.zeros(B, device=self.device)
+            raise RuntimeError("[CameraAngle] DINO inference failed.") from e
 
         return {
             "azimuth": azimuth.cpu(),

@@ -118,9 +118,10 @@ class _GarmentEncoder:
             print("[GarmentMetric] Using ViT-B/16 (timm) as CLIP proxy.")
             return
         except Exception as e:
-            print(f"[GarmentMetric] ViT unavailable ({e}). Using stub.")
-
-        self._backend = "stub"
+            raise RuntimeError(
+                "[GarmentMetric] No valid garment encoder available. "
+                "Install openai-clip, open_clip, transformers CLIP, or timm."
+            ) from e
 
     # --------------------------------------------------------------------- #
     @torch.no_grad()
@@ -140,7 +141,7 @@ class _GarmentEncoder:
         if self._backend == "vit":
             return self._vit_embed(cloth_imgs)
 
-        return np.random.default_rng(42).normal(0, 1, (B, self.embed_dim)).astype(np.float32)
+        raise RuntimeError("[GarmentMetric] No valid garment encoder available.")
 
     def _openai_clip_embed(self, imgs: torch.Tensor) -> np.ndarray:
         pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in imgs]

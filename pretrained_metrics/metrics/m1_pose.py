@@ -102,9 +102,10 @@ class _KeypointExtractor:
             print("[PoseMetric] Using HRNet-W32 (timm) for keypoint extraction.")
             return
         except Exception as e:
-            print(f"[PoseMetric] HRNet not available ({e}). Using random stub.")
-
-        self._backend = "stub"
+            raise RuntimeError(
+                "[PoseMetric] HRNet-W32 (timm) is required but unavailable. "
+                "Install timm and ensure weights can be downloaded."
+            ) from e
 
     # --------------------------------------------------------------------- #
     @torch.no_grad()
@@ -124,20 +125,23 @@ class _KeypointExtractor:
             feats = self._model.forward_features(imgs_r)   # (B, J, Hh, Wh)
             # Clamp in case forward_features returns pooled tensor
             if feats.ndim == 2:
-                # fallback: pooled — return stub
-                return self._stub(B, H_in, W_in)
+                raise RuntimeError(
+                    "[PoseMetric] HRNet output is pooled; keypoint heatmaps missing."
+                )
             B2, J, Hh, Ww = feats.shape
             # HRNet forward_features may return CNN feature maps (not heatmaps).
             # Only treat channels as keypoint heatmaps when J == 17 (COCO joints).
             if J != 17:
-                return self._stub(B, H_in, W_in)
+                raise RuntimeError(
+                    "[PoseMetric] HRNet output does not contain 17 joint heatmaps."
+                )
             flat = feats.view(B2, J, -1).argmax(-1)        # (B, J)
             ys   = (flat // Ww).float() / Hh * H_in
             xs   = (flat %  Ww).float() / Ww * W_in
             kps  = torch.stack([xs, ys], dim=-1)           # (B, J, 2)
             return kps.cpu().numpy()
 
-        return self._stub(B, H_in, W_in)
+        raise RuntimeError("[PoseMetric] No valid pose backend available.")
 
     def _stub(self, B: int, H: int, W: int) -> np.ndarray:
         """Random keypoints — only used when no model is loaded."""

@@ -108,16 +108,16 @@ class CLIPEmbedder:
             print("[CLIPEmbedder] Using HuggingFace CLIP")
             return
         except Exception as e:
-            print(f"[CLIPEmbedder] HuggingFace CLIP unavailable ({e})")
-        
-        self._backend = "stub"
-        print("[CLIPEmbedder] WARNING: No CLIP backend available, using stub")
+            raise RuntimeError(
+                "[CLIPEmbedder] No CLIP backend available. "
+                "Install openai-clip, open_clip, or transformers CLIP."
+            ) from e
     
     @torch.no_grad()
     def encode_images(self, images: List[Image.Image]) -> np.ndarray:
         """Encode PIL images to CLIP embeddings. Returns (N, D) array."""
         if self._backend == "stub":
-            return np.random.default_rng(42).normal(0, 1, (len(images), self.embed_dim)).astype(np.float32)
+            raise RuntimeError("[CLIPEmbedder] No valid CLIP backend available.")
         
         if self._backend == "openai_clip":
             import clip as _oa_clip
@@ -138,13 +138,13 @@ class CLIPEmbedder:
             emb = F.normalize(emb.float(), dim=-1)
             return emb.cpu().numpy()
         
-        return np.zeros((len(images), self.embed_dim), dtype=np.float32)
+        raise RuntimeError("[CLIPEmbedder] No valid CLIP backend available.")
     
     @torch.no_grad()
     def encode_texts(self, texts: List[str]) -> np.ndarray:
         """Encode text strings to CLIP embeddings. Returns (N, D) array."""
         if self._backend == "stub":
-            return np.random.default_rng(42).normal(0, 1, (len(texts), self.embed_dim)).astype(np.float32)
+            raise RuntimeError("[CLIPEmbedder] No valid CLIP backend available.")
         
         if self._backend == "openai_clip":
             import clip as _oa_clip
@@ -165,7 +165,7 @@ class CLIPEmbedder:
             emb = F.normalize(emb.float(), dim=-1)
             return emb.cpu().numpy()
         
-        return np.zeros((len(texts), self.embed_dim), dtype=np.float32)
+        raise RuntimeError("[CLIPEmbedder] No valid CLIP backend available.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

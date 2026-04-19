@@ -20,6 +20,12 @@
 # Disable tokenizers parallelism warning
 export TOKENIZERS_PARALLELISM=false
 
+# Activate the torch_env environment
+if [ -f "$HOME/.bashrc" ]; then
+    source "$HOME/.bashrc"
+fi
+conda activate torch_env
+
 # Dynamically get the master node for torchrun
 MASTER_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$MASTER_NODE

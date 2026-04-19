@@ -61,9 +61,9 @@ class _PersonSegmenter:
             ).to(self.device).eval()
             print("[BackgroundMetric] DeepLabV3 loaded for person segmentation.")
         except Exception as e:
-            print(f"[BackgroundMetric] DeepLabV3 unavailable ({e}). "
-                  "Using brightness-threshold person proxy.")
-            self._model = None
+            raise RuntimeError(
+                "[BackgroundMetric] DeepLabV3 is required but unavailable."
+            ) from e
 
     @torch.no_grad()
     def __call__(self, imgs: torch.Tensor) -> torch.Tensor:
@@ -138,9 +138,9 @@ class _ObjectDetector:
             self._backend = "detr"
             print("[BackgroundMetric] DETR loaded for object density.")
         except Exception as e:
-            print(f"[BackgroundMetric] DETR unavailable ({e}). "
-                  "Using connected-components object proxy.")
-            self._backend = "components"
+            raise RuntimeError(
+                "[BackgroundMetric] DETR is required but unavailable."
+            ) from e
 
     @torch.no_grad()
     def count_objects(
@@ -185,9 +185,7 @@ class _ObjectDetector:
                 n_obj = int((conf > self.CONF_THRESHOLD).sum().item())
                 counts.append(n_obj)
             return counts
-
-        # Proxy: connected components of high-gradient background pixels
-        return self._component_count(imgs, person_masks)
+        raise RuntimeError("[BackgroundMetric] No valid object detector backend available.")
 
     def _component_count(
         self, imgs: torch.Tensor, person_masks: torch.Tensor

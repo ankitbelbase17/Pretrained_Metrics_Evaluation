@@ -120,9 +120,10 @@ class _FaceEmbedder:
             print("[AppearanceMetric] Using open_clip ViT-B/32 as face proxy.")
             return
         except Exception as e:
-            print(f"[AppearanceMetric] open_clip unavailable ({e}). Using random stub.")
-
-        self._backend = "stub"
+            raise RuntimeError(
+                "[AppearanceMetric] No valid appearance backend available. "
+                "Install insightface, openai-clip, or open_clip."
+            ) from e
 
     # --------------------------------------------------------------------- #
     def _crop_face_region(self, img_tensor: torch.Tensor) -> torch.Tensor:
@@ -145,8 +146,7 @@ class _FaceEmbedder:
         if self._backend in ("clip", "open_clip"):
             return self._clip_embeddings(imgs)
 
-        rng = np.random.default_rng(42)
-        return rng.normal(0, 1, (B, self.EMBED_DIM)).astype(np.float32)
+        raise RuntimeError("[AppearanceMetric] No valid appearance backend available.")
 
     def _clip_embeddings(self, imgs: torch.Tensor) -> np.ndarray:
         """Shared encoder for both openai/clip and open_clip backends."""

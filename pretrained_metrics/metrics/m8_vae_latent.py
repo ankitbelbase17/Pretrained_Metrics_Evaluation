@@ -111,9 +111,9 @@ class _VAEEncoder:
             print(f"[VAEMetric] SD v1.5 VAE unavailable ({e}).")
 
         # Stub fallback
-        print("[VAEMetric] No VAE backend available. Using stub (random).")
-        self._backend = "stub"
-        self.embed_dim = 512  # Smaller for stub
+        raise RuntimeError(
+            "[VAEMetric] No VAE backend available. Install diffusers and a supported VAE."
+        )
 
     @torch.no_grad()
     def __call__(self, imgs: torch.Tensor) -> np.ndarray:
@@ -129,7 +129,7 @@ class _VAEEncoder:
         B = imgs.shape[0]
 
         if self._backend == "stub":
-            return np.random.randn(B, self.embed_dim).astype(np.float32)
+            raise RuntimeError("[VAEMetric] No valid VAE backend available.")
 
         # Normalize to [-1, 1] for SD VAE
         imgs_norm = imgs * 2.0 - 1.0

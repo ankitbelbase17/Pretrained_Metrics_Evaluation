@@ -273,9 +273,11 @@ class _SegBackend:
             return
         except Exception as e:
             print(f"[OcclusionMetric] DeepLabV3 unavailable ({e}). "
-                  "Falling back to saliency proxy.")
-
-        self._backend = "stub"
+                  "No valid occlusion backend available.")
+            raise RuntimeError(
+                "[OcclusionMetric] No segmentation backend available. "
+                "Install Mask2Former, SegFormer, or DeepLabV3 dependencies."
+            ) from e
     
     # --------------------------------------------------------------------- #
     def _try_load_object_detector(self):
@@ -308,9 +310,10 @@ class _SegBackend:
             return
         except Exception:
             pass
-        
-        print("[OcclusionMetric] No object detector available. "
-              "Environmental occlusion detection limited.")
+        raise RuntimeError(
+            "[OcclusionMetric] No object detector available. "
+            "Install DETR (transformers) or ultralytics YOLO."
+        )
 
     # --------------------------------------------------------------------- #
     def _dilate_mask(self, mask: torch.Tensor, kernel_size: int = 5) -> torch.Tensor:
@@ -357,6 +360,9 @@ class _SegBackend:
             "arms", "hair", "other"
         """
         B, C, H, W = imgs.shape
+
+        if self._backend == "stub":
+            raise RuntimeError("[OcclusionMetric] No valid segmentation backend available.")
 
         if self._backend == "mask2former":
             return self._mask2former_masks(imgs, H, W)
