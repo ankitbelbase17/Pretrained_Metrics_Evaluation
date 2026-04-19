@@ -34,7 +34,7 @@ echo "================================================================="
 # Launch the unified Python orchestrator.
 # --gpus 4 tells run.py to automatically use torchrun for DataParallel processing
 # across the heavy deep learning models.
-srun python3 run.py --gpus $SLURM_GPUS_ON_NODE
+srun python run.py --gpus $SLURM_GPUS_ON_NODE
 
 if [ $? -ne 0 ]; then
     echo "Error: Unified Pipeline failed! Check the logs above."
