@@ -23,16 +23,16 @@ defaults:
   run_garment: true
 
 datasets:
-  - name: curvton_test
+  - name: curvton
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test
     split: test
-  - name: curvton_easy_test
+  - name: curvton
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/easy
     split: test
-  - name: curvton_medium_test
+  - name: curvton
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/medium
     split: test
-  - name: curvton_hard_test
+  - name: curvton
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/hard
     split: test
 
