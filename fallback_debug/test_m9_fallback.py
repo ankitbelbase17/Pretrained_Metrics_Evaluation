@@ -21,21 +21,26 @@ from fallback_debug.common import (
 
 
 def try_hmr2(device: str) -> str:
-    from hmr2.models import DEFAULT_CHECKPOINT, load_hmr2
+    from hmr2.models import DEFAULT_CHECKPOINT, download_models, load_hmr2
+    import torch.serialization as _ts
+    from omegaconf import DictConfig as _DictConfig, ListConfig as _ListConfig
 
-    # Mirrors current m9 code path closely
-    model = load_hmr2(DEFAULT_CHECKPOINT).to(device).eval()
+    _ts.add_safe_globals([_DictConfig, _ListConfig])
+    download_models()
+    model, _cfg = load_hmr2(DEFAULT_CHECKPOINT)
+    model = model.to(device).eval()
     return f"camera_backend=hmr2, model={type(model).__name__}"
 
 
 def try_vitpose(device: str) -> str:
-    from transformers import AutoModel
+    from transformers import AutoProcessor, VitPoseForPoseEstimation
 
-    model = AutoModel.from_pretrained(
+    processor = AutoProcessor.from_pretrained("usyd-community/vitpose-base-simple")
+    model = VitPoseForPoseEstimation.from_pretrained(
         "usyd-community/vitpose-base-simple",
-        trust_remote_code=True,
+        use_safetensors=True,
     ).to(device).eval()
-    return f"camera_backend=vitpose, model={model.__class__.__name__}"
+    return f"camera_backend=vitpose, model={model.__class__.__name__}, processor={processor.__class__.__name__}"
 
 
 def try_keypointrcnn(device: str) -> str:
@@ -86,4 +91,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

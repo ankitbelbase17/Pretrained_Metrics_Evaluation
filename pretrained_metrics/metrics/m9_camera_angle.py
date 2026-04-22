@@ -91,7 +91,9 @@ class _CameraAngleBackend:
 
         # Model references
         self._hmr_model = None
+        self._hmr_cfg = None
         self._vitpose_model = None
+        self._vitpose_processor = None
         self._dino_model = None
         self._dino_processor = None
 
@@ -103,8 +105,14 @@ class _CameraAngleBackend:
 
         # ── Try HMR2.0 first ──────────────────────────────────────────────────
         try:
-            from hmr2.models import load_hmr2, DEFAULT_CHECKPOINT
-            self._hmr_model = load_hmr2(DEFAULT_CHECKPOINT).to(self.device).eval()
+            from hmr2.models import download_models, load_hmr2, DEFAULT_CHECKPOINT
+            import torch.serialization as _ts
+            from omegaconf import DictConfig as _DictConfig, ListConfig as _ListConfig
+
+            _ts.add_safe_globals([_DictConfig, _ListConfig])
+            download_models()
+            self._hmr_model, self._hmr_cfg = load_hmr2(DEFAULT_CHECKPOINT)
+            self._hmr_model = self._hmr_model.to(self.device).eval()
             self._backend = "hmr2"
             print("[CameraAngle] Using HMR2.0 for camera estimation.")
             return
@@ -113,11 +121,13 @@ class _CameraAngleBackend:
 
         # ── Try ViTPose ───────────────────────────────────────────────────────
         try:
-            from transformers import AutoModel
-            # ViTPose or similar pose model
-            self._vitpose_model = AutoModel.from_pretrained(
+            from transformers import AutoProcessor, VitPoseForPoseEstimation
+            self._vitpose_processor = AutoProcessor.from_pretrained(
+                "usyd-community/vitpose-base-simple"
+            )
+            self._vitpose_model = VitPoseForPoseEstimation.from_pretrained(
                 "usyd-community/vitpose-base-simple",
-                trust_remote_code=True
+                use_safetensors=True,
             ).to(self.device).eval()
             self._backend = "vitpose"
             print("[CameraAngle] Using ViTPose for body orientation estimation.")
@@ -127,9 +137,6 @@ class _CameraAngleBackend:
 
         # Try alternative pose model
         try:
-            from transformers import AutoModelForImageClassification, AutoImageProcessor
-            # Use a pose estimation model
-            self._vitpose_model = None  # Will use torchvision pose
             import torchvision
             weights = torchvision.models.detection.KeypointRCNN_ResNet50_FPN_Weights.DEFAULT
             self._vitpose_model = torchvision.models.detection.keypointrcnn_resnet50_fpn(
@@ -205,25 +212,39 @@ class _CameraAngleBackend:
         imgs_resized = F.interpolate(imgs_norm, size=(256, 256), mode="bilinear", align_corners=False)
 
         try:
-            output = self._hmr_model(imgs_resized)
+            output = self._hmr_model({"img": imgs_resized})
             # Global orientation is axis-angle (B, 3)
-            global_orient = output.get("global_orient", output.get("body_pose", None))
+            global_orient = None
+            if isinstance(output, dict):
+                global_orient = output.get("global_orient", output.get("body_pose", None))
+                if global_orient is None and isinstance(output.get("pred_smpl_params"), dict):
+                    pred_smpl = output["pred_smpl_params"]
+                    global_orient = pred_smpl.get("global_orient", pred_smpl.get("body_pose", None))
+
+            if global_orient is not None:
+                if global_orient.ndim == 3:
+                    global_orient = global_orient[:, 0, :3]
+                elif global_orient.ndim == 2 and global_orient.shape[1] >= 3:
+                    global_orient = global_orient[:, :3]
+                else:
+                    global_orient = None
 
             if global_orient is not None:
                 # Convert axis-angle to euler angles
-                azimuth, elevation = self._axis_angle_to_euler(global_orient[:, :3])
+                azimuth, elevation = self._axis_angle_to_euler(global_orient)
+                confidence = torch.ones(B, device=self.device)
             else:
                 # Fallback to camera parameters
-                pred_cam = output.get("pred_cam", None)
+                pred_cam = output.get("pred_cam", None) if isinstance(output, dict) else None
                 if pred_cam is not None:
                     # pred_cam is (s, tx, ty) - limited angle info
                     azimuth = torch.zeros(B, device=self.device)
                     elevation = torch.zeros(B, device=self.device)
+                    confidence = torch.ones(B, device=self.device) * 0.5
                 else:
                     azimuth = torch.zeros(B, device=self.device)
                     elevation = torch.zeros(B, device=self.device)
-
-            confidence = torch.ones(B, device=self.device)
+                    confidence = torch.zeros(B, device=self.device)
 
         except Exception as e:
             raise RuntimeError("[CameraAngle] HMR2.0 inference failed.") from e
@@ -282,16 +303,60 @@ class _CameraAngleBackend:
         B = imgs.shape[0]
 
         try:
-            # Get pose predictions
-            outputs = self._vitpose_model(imgs)
-            keypoints = outputs.get("keypoints", None)
+            import torchvision.transforms.functional as TF
 
-            if keypoints is not None:
-                azimuth, elevation, confidence = self._keypoints_to_angles(keypoints, H, W)
-            else:
-                azimuth = torch.zeros(B, device=self.device)
-                elevation = torch.zeros(B, device=self.device)
-                confidence = torch.zeros(B, device=self.device)
+            if self._vitpose_processor is None:
+                raise RuntimeError("ViTPose processor is not initialized.")
+
+            pils = [TF.to_pil_image(imgs[i].cpu().clamp(0, 1)) for i in range(B)]
+
+            # ViTPose is top-down in transformers; use one full-image person box.
+            # Processor expects COCO xywh boxes.
+            boxes = [np.array([[0.0, 0.0, float(W), float(H)]], dtype=np.float32) for _ in range(B)]
+
+            inputs = self._vitpose_processor(images=pils, boxes=boxes, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            outputs = self._vitpose_model(**inputs)
+            pose_results = self._vitpose_processor.post_process_pose_estimation(
+                outputs, boxes=boxes, threshold=0.3
+            )
+
+            azimuth_list = []
+            elevation_list = []
+            confidence_list = []
+
+            for i in range(B):
+                img_res = pose_results[i] if i < len(pose_results) else []
+                if not img_res:
+                    azimuth_list.append(0.0)
+                    elevation_list.append(0.0)
+                    confidence_list.append(0.0)
+                    continue
+
+                person_pose = img_res[0]
+                kpts = torch.zeros(17, 3)
+                for kp, score, label in zip(
+                    person_pose.get("keypoints", []),
+                    person_pose.get("scores", []),
+                    person_pose.get("labels", []),
+                ):
+                    idx = int(label.item() if torch.is_tensor(label) else label)
+                    if 0 <= idx < 17:
+                        x = float(kp[0].item() if torch.is_tensor(kp[0]) else kp[0])
+                        y = float(kp[1].item() if torch.is_tensor(kp[1]) else kp[1])
+                        s = float(score.item() if torch.is_tensor(score) else score)
+                        kpts[idx, 0] = x
+                        kpts[idx, 1] = y
+                        kpts[idx, 2] = s
+
+                az, el, conf = self._single_keypoints_to_angle(kpts, H, W)
+                azimuth_list.append(az)
+                elevation_list.append(el)
+                confidence_list.append(conf)
+
+            azimuth = torch.tensor(azimuth_list)
+            elevation = torch.tensor(elevation_list)
+            confidence = torch.tensor(confidence_list)
 
         except Exception as e:
             raise RuntimeError("[CameraAngle] ViTPose inference failed.") from e
