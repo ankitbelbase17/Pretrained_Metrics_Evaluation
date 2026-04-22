@@ -21,9 +21,7 @@
 export TOKENIZERS_PARALLELISM=false
 
 # Activate the torch_env environment
-if [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc"
-fi
+source /iopsstor/scratch/cscs/dbartaula/miniforge3/etc/profile.d/conda.sh
 conda activate torch_env
 
 # Dynamically get the master node for torchrun

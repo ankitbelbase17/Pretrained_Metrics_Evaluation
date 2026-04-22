@@ -23,11 +23,17 @@ person_imgs : torch.Tensor  (B, 3, H, W)  float32  [0, 1]
 Returns (via compute())
 ------------------------
 dict with:
-    bg_entropy_mean          : mean texture entropy across dataset
-    bg_entropy_var           : variance of texture entropy
-    bg_object_density_mean   : mean #objects in background per image
-    bg_complexity_3A         : bg_entropy_mean  (alias)
-    bg_complexity_3B         : bg_object_density_mean  (alias)
+    bg_entropy_mean              : mean texture entropy across dataset
+    bg_entropy_var               : variance of texture entropy
+    bg_object_density_mean       : mean #objects in background per image
+    bg_semantic_entropy_mean     : mean semantic class entropy (DETR classes)
+    bg_semantic_entropy_var      : variance of semantic class entropy
+    bg_semantic_unique_mean      : mean #unique semantic classes per image
+    bg_semantic_unique_var       : variance of #unique semantic classes
+    bg_complexity_3A             : bg_entropy_mean  (alias)
+    bg_complexity_3B             : bg_object_density_mean  (alias)
+    bg_complexity_semantic       : bg_semantic_entropy_mean (alias)
+    bg_semantic_entropy_global   : global entropy over all detections
 """
 
 from __future__ import annotations
@@ -110,6 +116,15 @@ def _texture_entropy(bg_rgb: torch.Tensor, person_mask: torch.Tensor) -> float:
     return float(-np.sum(p * np.log(p)))
 
 
+def _semantic_entropy(class_ids: List[int]) -> float:
+    if not class_ids:
+        return float("nan")
+    ids = np.array(class_ids, dtype=int)
+    uniq, counts = np.unique(ids, return_counts=True)
+    p = counts.astype(float) / counts.sum()
+    return float(-np.sum(p * np.log(p)))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Object detector
 # ─────────────────────────────────────────────────────────────────────────────
@@ -187,6 +202,46 @@ class _ObjectDetector:
             return counts
         raise RuntimeError("[BackgroundMetric] No valid object detector backend available.")
 
+    @torch.no_grad()
+    def detect_classes(
+        self, imgs: torch.Tensor, person_masks: torch.Tensor
+    ) -> List[List[int]]:
+        """
+        Returns per-image list of DETR class ids above confidence threshold.
+        """
+        if self._backend != "detr":
+            raise RuntimeError("[BackgroundMetric] No valid object detector backend available.")
+
+        import torchvision.transforms.functional as TF
+
+        B = imgs.shape[0]
+        imgs_masked = imgs.clone()
+        for i in range(B):
+            imgs_masked[i, :, person_masks[i]] = 0.0
+
+        pils = []
+        for i in range(B):
+            pil = TF.to_pil_image(imgs_masked[i].clamp(0, 1).cpu()).convert("RGB")
+            if pil.width < 32 or pil.height < 32:
+                pil = pil.resize((224, 224))
+            pils.append(pil)
+
+        inputs = self._feature(
+            images=pils,
+            return_tensors="pt",
+            input_data_format="channels_last",
+        ).to(self.device)
+        outs = self._model(**inputs)
+
+        classes = []
+        for i in range(B):
+            probs = outs.logits.softmax(-1)[i, :, :-1]
+            conf = probs.max(-1).values
+            labels = probs.argmax(-1)
+            keep = conf > self.CONF_THRESHOLD
+            classes.append(labels[keep].cpu().tolist())
+        return classes
+
     def _component_count(
         self, imgs: torch.Tensor, person_masks: torch.Tensor
     ) -> List[int]:
@@ -230,16 +285,25 @@ class BackgroundMetrics:
         self._detector  = _ObjectDetector(device)
         self._entropies: List[float] = []
         self._obj_counts: List[int]  = []
+        self._semantic_entropies: List[float] = []
+        self._semantic_uniques: List[int] = []
+        self._semantic_all: List[int] = []
 
     # ------------------------------------------------------------------ #
     def update(self, person_imgs: torch.Tensor):
         """person_imgs : (B, 3, H, W)  float32  [0,1]"""
         person_masks = self._segmenter(person_imgs)      # (B,H,W) bool
         obj_counts   = self._detector.count_objects(person_imgs, person_masks)
+        class_lists  = self._detector.detect_classes(person_imgs, person_masks)
 
         for i in range(person_imgs.shape[0]):
             ent = _texture_entropy(person_imgs[i], person_masks[i])
             self._entropies.append(ent)
+
+            sem_ent = _semantic_entropy(class_lists[i])
+            self._semantic_entropies.append(sem_ent)
+            self._semantic_uniques.append(len(set(class_lists[i])))
+            self._semantic_all.extend(class_lists[i])
 
         self._obj_counts.extend(obj_counts)
 
@@ -247,15 +311,27 @@ class BackgroundMetrics:
     def compute(self) -> Dict[str, float]:
         ent = np.array([v for v in self._entropies if not math.isnan(v)])
         obj = np.array(self._obj_counts, dtype=float)
+        sem_ent = np.array([v for v in self._semantic_entropies if not math.isnan(v)])
+        sem_uniq = np.array(self._semantic_uniques, dtype=float)
+        sem_global = _semantic_entropy(self._semantic_all)
 
         return {
             "bg_entropy_mean":        float(ent.mean()) if len(ent) else float("nan"),
             "bg_entropy_var":         float(ent.var())  if len(ent) else float("nan"),
             "bg_object_density_mean": float(obj.mean()) if len(obj) else float("nan"),
+            "bg_semantic_entropy_mean": float(sem_ent.mean()) if len(sem_ent) else float("nan"),
+            "bg_semantic_entropy_var":  float(sem_ent.var())  if len(sem_ent) else float("nan"),
+            "bg_semantic_unique_mean":  float(sem_uniq.mean()) if len(sem_uniq) else float("nan"),
+            "bg_semantic_unique_var":   float(sem_uniq.var())  if len(sem_uniq) else float("nan"),
             "bg_complexity_3A":       float(ent.mean()) if len(ent) else float("nan"),
             "bg_complexity_3B":       float(obj.mean()) if len(obj) else float("nan"),
+            "bg_complexity_semantic": float(sem_ent.mean()) if len(sem_ent) else float("nan"),
+            "bg_semantic_entropy_global": float(sem_global),
         }
 
     def reset(self):
         self._entropies.clear()
+        self._semantic_entropies.clear()
+        self._semantic_uniques.clear()
+        self._semantic_all.clear()
         self._obj_counts.clear()
