@@ -27,8 +27,10 @@ when a face detector is unavailable (avoids dependency on RetinaFace).
 Returns (compute())
 --------------------
 dict with:
-    appearance_diversity_mean    : mean pairwise cosine distance  (D_face)
-    appearance_diversity_std     : std of pairwise cosine distances
+    appearance_diversity_mean            : mean pairwise cosine distance  (raw in [0,2])
+    appearance_diversity_std             : std of pairwise cosine distances (raw)
+    appearance_diversity_mean_normalized : normalized mean in [0,1] via /2
+    appearance_diversity_std_normalized  : normalized std in [0,1] via /2
     n_faces                      : total face embeddings collected
 """
 
@@ -203,6 +205,8 @@ class AppearanceMetrics:
             return {
                 "appearance_diversity_mean": float("nan"),
                 "appearance_diversity_std":  float("nan"),
+                "appearance_diversity_mean_normalized": float("nan"),
+                "appearance_diversity_std_normalized":  float("nan"),
                 "n_faces":                   float(N),
             }
 
@@ -217,10 +221,19 @@ class AppearanceMetrics:
         triu = C[np.triu_indices(N, k=1)]                  # (N*(N-1)/2,)
         cos_dist = 1.0 - triu                              # cosine distance
 
+        mean_raw = float(cos_dist.mean())
+        std_raw = float(cos_dist.std())
+
+        # 1 - cosine similarity is in [0, 2]; divide by 2 to match [0, 1] style.
+        mean_norm = float(np.clip(mean_raw / 2.0, 0.0, 1.0))
+        std_norm = float(np.clip(std_raw / 2.0, 0.0, 1.0))
+
         return {
-            "appearance_diversity_mean": float(cos_dist.mean()),
-            "appearance_diversity_std":  float(cos_dist.std()),
-            "n_faces":                   float(N),
+            "appearance_diversity_mean": mean_raw,
+            "appearance_diversity_std": std_raw,
+            "appearance_diversity_mean_normalized": mean_norm,
+            "appearance_diversity_std_normalized": std_norm,
+            "n_faces": float(N),
         }
 
     def reset(self):

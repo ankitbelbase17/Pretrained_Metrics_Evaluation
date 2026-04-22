@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 import torch
+from pretrained_metrics.cache_setup import DEFAULT_MODEL_BASE, ensure_hmr2_smpl_model
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,6 +23,13 @@ from fallback_debug.common import (
 
 
 def try_hmr2(device: str) -> str:
+    smpl = ensure_hmr2_smpl_model(DEFAULT_MODEL_BASE)
+    if smpl["status"] == "missing_source":
+        raise FileNotFoundError(
+            f"SMPL source missing at {smpl['src']}. "
+            f"Expected target for HMR2 is {smpl['dst']}."
+        )
+
     from hmr2.models import DEFAULT_CHECKPOINT, download_models, load_hmr2
     import torch.serialization as _ts
     from omegaconf import DictConfig as _DictConfig, ListConfig as _ListConfig
@@ -30,7 +38,10 @@ def try_hmr2(device: str) -> str:
     download_models()
     model, _cfg = load_hmr2(DEFAULT_CHECKPOINT)
     model = model.to(device).eval()
-    return f"camera_backend=hmr2, model={type(model).__name__}"
+    return (
+        f"camera_backend=hmr2, model={type(model).__name__}, "
+        f"smpl_status={smpl['status']}, smpl_target={smpl['dst']}"
+    )
 
 
 def try_vitpose(device: str) -> str:
