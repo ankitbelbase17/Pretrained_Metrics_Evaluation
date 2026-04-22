@@ -247,7 +247,19 @@ def phase1_pretrained_metrics(args):
         "--batch_size", str(args.batch_size),
         "--num_workers", str(args.num_workers),
     ]
-    return _run_python(script, cli_args, "Pretrained Metrics (all datasets)", gpus=1)
+    ok = _run_python(script, cli_args, "Pretrained Metrics (all datasets)", gpus=1)
+    if not ok:
+        return False
+
+    # Sanity-check outputs so silent no-op runs are treated as failures.
+    metrics_dir = Path(args.output_dir) / "metrics"
+    has_json = any(metrics_dir.glob("pretrained_metrics_comprehensive_*.json"))
+    if not has_json:
+        print("  [FATAL ERROR] Phase 1 finished but no comprehensive metrics JSON was produced.")
+        print(f"  [DEBUG] Expected in: {metrics_dir.resolve()}")
+        return False
+
+    return True
 
 
 def phase2_curvton_eda(args):
@@ -607,6 +619,11 @@ def main():
     print(f"    Metrics       : metrics/")
     print(f"    Plots         : plots/")
     print("=" * 70)
+
+    failed = [phase_id for phase_id, ok in sorted(results.items()) if not ok]
+    if failed:
+        print(f"\n  [EXIT 1] Failed phases: {failed}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
