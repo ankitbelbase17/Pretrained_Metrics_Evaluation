@@ -36,6 +36,13 @@ from plot_style import (
 apply_paper_style()
 
 
+def _pca_2d_numpy(X: np.ndarray) -> np.ndarray:
+    """Lightweight PCA fallback that does not require sklearn."""
+    Xc = X - X.mean(axis=0, keepdims=True)
+    _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+    return Xc @ Vt[:2].T
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 7A — UMAP of garment embeddings (ECCV Style)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -72,10 +79,14 @@ def plot_garment_umap(
         Z = reducer.fit_transform(E_all)
         method = "UMAP"
     except ImportError:
-        from sklearn.manifold import TSNE
-        Z = TSNE(n_components=2, random_state=0, metric="cosine",
-                 perplexity=min(30, len(E_all) // 4)).fit_transform(E_all)
-        method = "t-SNE"
+        try:
+            from sklearn.manifold import TSNE
+            Z = TSNE(n_components=2, random_state=0, metric="cosine",
+                     perplexity=min(30, len(E_all) // 4)).fit_transform(E_all)
+            method = "t-SNE"
+        except ImportError:
+            Z = _pca_2d_numpy(E_all)
+            method = "PCA"
 
     fig, ax = plt.subplots(figsize=(4.5, 3.8))
     

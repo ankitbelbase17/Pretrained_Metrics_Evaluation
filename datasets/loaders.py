@@ -596,9 +596,109 @@ class StreetTryOnDataset(BaseTryOnDataset):
 # ─────────────────────────────────────────────────────────────────────────────
 class CurvTONDataset(VITONHDDataset):
     """
-    Custom CurvTON dataset. Mirrors VITON-HD structure.
+    Custom CurvTON dataset.
+
+    Supports two layouts:
+    1) VITON-HD-like (fallback to parent loader):
+         <root>/<split>/image, cloth, ... and optional pairs files
+    2) CurvTON native difficulty/gender layout:
+         <root>/
+           easy|medium|hard/
+             female|male/
+               cloth_image/
+               tryon_image/
+               initial_person_image/
+
+       It can also be pointed directly at one difficulty folder:
+         <root>/easy/{female,male}/...
     """
-    pass
+    _DIFFICULTIES = ("easy", "medium", "hard")
+    _GENDERS = ("female", "male")
+
+    def _load_samples(self) -> List[Dict]:
+        # First, try the existing VITON-HD behavior for backward compatibility.
+        try:
+            return super()._load_samples()
+        except FileNotFoundError:
+            pass
+
+        # Then parse the native CurvTON folder structure.
+        root = self.root
+
+        # If root itself looks like a single difficulty folder (contains female/male),
+        # only parse that folder; otherwise parse easy/medium/hard under root.
+        if any((root / g).exists() for g in self._GENDERS):
+            difficulty_roots = [root]
+        else:
+            difficulty_roots = [root / d for d in self._DIFFICULTIES if (root / d).exists()]
+
+        if not difficulty_roots:
+            raise FileNotFoundError(
+                f"CurvTON root not recognized: {root}\n"
+                f"Expected either VITON-HD style '<root>/<split>/image' or native "
+                f"CurvTON style with easy/medium/hard and female/male subfolders."
+            )
+
+        samples: List[Dict] = []
+
+        for diff_root in difficulty_roots:
+            diff_name = diff_root.name.lower()
+            for gender in self._GENDERS:
+                g_root = diff_root / gender
+                if not g_root.exists():
+                    continue
+
+                cloth_dir = g_root / "cloth_image"
+                tryon_dir = g_root / "tryon_image"
+                person_dir = g_root / "initial_person_image"
+
+                if not (cloth_dir.exists() and tryon_dir.exists() and person_dir.exists()):
+                    continue
+
+                for tryon_name in sorted(os.listdir(tryon_dir)):
+                    if not tryon_name.lower().endswith((".png", ".jpg", ".jpeg")):
+                        continue
+
+                    tryon_path = tryon_dir / tryon_name
+                    cloth_path = cloth_dir / tryon_name
+
+                    # Expected naming example:
+                    #   fh_008106_e03_fc_018511_kasavu_saree.png
+                    #   mh_009219_e01_mc_005387_yukata.png
+                    # Person ID is the first 3 tokens: fh_008106_e03 / mh_009219_e01
+                    stem = Path(tryon_name).stem
+                    parts = stem.split("_")
+                    person_id = "_".join(parts[:3]) if len(parts) >= 3 else stem
+
+                    # Prefer .png, then .jpg/.jpeg
+                    person_path = person_dir / f"{person_id}.png"
+                    if not person_path.exists():
+                        for ext in (".jpg", ".jpeg"):
+                            alt = person_dir / f"{person_id}{ext}"
+                            if alt.exists():
+                                person_path = alt
+                                break
+
+                    # Skip broken tuples rather than crashing whole dataset.
+                    if not (person_path.exists() and cloth_path.exists() and tryon_path.exists()):
+                        continue
+
+                    samples.append(dict(
+                        id=f"{diff_name}_{gender}_{stem}",
+                        person_path=person_path,
+                        cloth_path=cloth_path,
+                        gt_path=tryon_path,
+                        mask_path=None,
+                    ))
+
+        if not samples:
+            raise FileNotFoundError(
+                f"Found CurvTON-style directories under {root}, but no valid triplets were built.\n"
+                f"Check that tryon_image and cloth_image filenames align and that person ids "
+                f"can be resolved in initial_person_image."
+            )
+
+        return samples
 
 
 # ─────────────────────────────────────────────────────────────────────────────

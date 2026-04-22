@@ -23,8 +23,12 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 import seaborn as sns
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+try:
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from plot_style import (
@@ -35,6 +39,32 @@ from plot_style import (
 )
 
 apply_paper_style()
+
+
+def _standardize(X: np.ndarray) -> np.ndarray:
+    """Feature-wise standardization with a numpy fallback if sklearn is unavailable."""
+    if HAS_SKLEARN:
+        return StandardScaler().fit_transform(X)
+    mu = X.mean(axis=0, keepdims=True)
+    sigma = X.std(axis=0, keepdims=True)
+    sigma[sigma < 1e-8] = 1.0
+    return (X - mu) / sigma
+
+
+def _pca_2d(X_scaled: np.ndarray, n_components: int = 2) -> tuple[np.ndarray, np.ndarray]:
+    """Return (projected_2d, explained_variance_ratio)."""
+    if HAS_SKLEARN:
+        pca = PCA(n_components=n_components, random_state=42)
+        Z = pca.fit_transform(X_scaled)
+        return Z, pca.explained_variance_ratio_
+
+    Xc = X_scaled - X_scaled.mean(axis=0, keepdims=True)
+    _, S, Vt = np.linalg.svd(Xc, full_matrices=False)
+    k = min(n_components, Vt.shape[0])
+    Z = Xc @ Vt[:k].T
+    var = (S ** 2) / max(Xc.shape[0] - 1, 1)
+    ev_ratio = var / max(var.sum(), 1e-12)
+    return Z, ev_ratio[:k]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -203,11 +233,9 @@ def plot_illumination_pca(
     X = np.concatenate(mats, axis=0).astype(np.float32)
     X = np.nan_to_num(X, nan=0.5, posinf=1.0, neginf=0.0)
     
-    X_scaled = StandardScaler().fit_transform(X)
-
-    pca = PCA(n_components=2, random_state=42)
-    Z   = pca.fit_transform(X_scaled)
-    ev  = pca.explained_variance_ratio_ * 100
+    X_scaled = _standardize(X)
+    Z, ev_ratio = _pca_2d(X_scaled, n_components=n_components)
+    ev = ev_ratio * 100
 
     fig, ax = plt.subplots(figsize=(4.5, 3.5))
     
@@ -248,9 +276,9 @@ def plot_illumination_pca(
     legend.get_title().set_fontweight("bold")
 
     # Eigenvalue spectrum inset
-    n_show = min(8, pca.n_components_)
+    n_show = min(8, len(ev_ratio))
     inset = ax.inset_axes([0.68, 0.04, 0.30, 0.30])
-    ev_full = pca.explained_variance_ratio_[:n_show] * 100
+    ev_full = ev_ratio[:n_show] * 100
     inset.bar(
         range(1, n_show + 1), ev_full, 
         color="#0077BB", edgecolor="white", linewidth=0.5,

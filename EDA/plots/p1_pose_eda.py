@@ -51,6 +51,13 @@ LIMB_NAMES = [
 LIMB_NAMES_SHORT = ["L-Elb", "R-Elb", "L-Kn", "R-Kn", "L-Sh", "R-Sh", "L-Tor", "R-Tor"]
 
 
+def _pca_2d_numpy(X: np.ndarray) -> np.ndarray:
+    """Lightweight PCA fallback that does not require sklearn."""
+    Xc = X - X.mean(axis=0, keepdims=True)
+    _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+    return Xc @ Vt[:2].T
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1A — UMAP scatter of pose vectors (ECCV Style)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -80,9 +87,13 @@ def plot_pose_umap(
     print(f"  [PoseEDA] Embedding {len(V_norm)} poses …")
 
     if use_tsne:
-        from sklearn.manifold import TSNE
-        Z = TSNE(n_components=2, random_state=42, perplexity=min(30, len(V_norm)//4)).fit_transform(V_norm)
-        method_name = "t-SNE"
+        try:
+            from sklearn.manifold import TSNE
+            Z = TSNE(n_components=2, random_state=42, perplexity=min(30, len(V_norm)//4)).fit_transform(V_norm)
+            method_name = "t-SNE"
+        except ImportError:
+            Z = _pca_2d_numpy(V_norm)
+            method_name = "PCA (sklearn not installed)"
     else:
         try:
             import umap
@@ -91,9 +102,13 @@ def plot_pose_umap(
             Z = reducer.fit_transform(V_norm)
             method_name = "UMAP"
         except ImportError:
-            from sklearn.decomposition import PCA
-            Z = PCA(n_components=2, random_state=42).fit_transform(V_norm)
-            method_name = "PCA (umap not installed)"
+            try:
+                from sklearn.decomposition import PCA
+                Z = PCA(n_components=2, random_state=42).fit_transform(V_norm)
+                method_name = "PCA (umap not installed)"
+            except ImportError:
+                Z = _pca_2d_numpy(V_norm)
+                method_name = "PCA (umap/sklearn not installed)"
 
     # ── ECCV-style figure ──────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(4.5, 4.0))
