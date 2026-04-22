@@ -61,7 +61,6 @@ from EDA.plots.p5_body_shape_eda import plot_shape_pca, plot_shape_coefficient_h
 from EDA.plot_style import set_global_prefix
 from EDA.plots.p6_appearance_eda import plot_face_umap, plot_pairwise_distance_distribution
 from EDA.plots.p7_garment_eda import plot_garment_umap, plot_eigenvalue_spectrum
-from EDA.plots.p10_camera_angle_eda import run_camera_angle_eda, plot_camera_angle_comparison, extract_camera_angles
 from EDA.plots.p11_clip_embedding_eda import run_clip_embedding_eda
 
 apply_paper_style()
@@ -595,20 +594,8 @@ def run_curvton_eda(
         plot_garment_umap(garment_data, str(out_path / "garment"))
         plot_eigenvalue_spectrum(garment_data, str(out_path / "garment"))
     
-    # --- 8. Camera Angle EDA ---
-    print("\n[8/9] Camera Angle Diversity...")
-    camera_data = {}
-    for name, feats in all_features.items():
-        az, el = extract_camera_angles(feats)
-        if len(az) == 0:
-            continue
-        camera_data[name] = {"azimuths": az, "elevations": el}
-        run_camera_angle_eda(feats, dataset_name=name, output_dir=str(out_path / "camera"))
-    if len(camera_data) >= 2:
-        plot_camera_angle_comparison(camera_data, output_dir=str(out_path / "camera"))
-
-    # --- 9. CLIP Embedding EDA (Image + Text) ---
-    print("\n[9/9] CLIP Embedding Analysis (20% sample)...")
+    # --- 8. CLIP Embedding EDA (Image + Text) ---
+    print("\n[8/8] CLIP Embedding Analysis (20% sample)...")
     # Run CLIP embedding EDA at 20% sample ratio for efficiency
     clip_sample_ratio = min(sample_ratio, 0.2)  # Cap at 20% for CLIP analysis
     run_clip_embedding_eda(

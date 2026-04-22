@@ -72,9 +72,6 @@ from plots.p8_meta_correlation import (
 from plots.p9_vae_eda          import (
     plot_vae_pca, plot_vae_pca_combined, plot_vae_explained_variance, plot_vae_tsne
 )
-from plots.p10_camera_angle_eda import (
-    run_camera_angle_eda, plot_camera_angle_comparison, extract_camera_angles
-)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,21 +201,6 @@ def run_all_plots(
         else:
             print("\n  [P9] Skipping VAE plots (no vae_embs in cache)")
 
-    # ── P10: Camera Angle ───────────────────────────────────────────
-    if "p10" not in skip:
-        print("\n  [P10] Camera Angle …")
-        camera_data = {}
-        for name, d in all_data.items():
-            az, el = extract_camera_angles(d)
-            if len(az) == 0:
-                continue
-            camera_data[name] = {"azimuths": az, "elevations": el}
-            run_camera_angle_eda(d, dataset_name=name, output_dir=str(P / "camera"))
-
-        if len(camera_data) >= 2:
-            plot_camera_angle_comparison(camera_data, output_dir=str(P / "camera"))
-        elif len(camera_data) == 0:
-            print("\n  [P10] Skipping camera plots (no camera or pose data in cache)")
     print("\n  ✓  All EDA figures complete.")
     print(f"     Output → {P.resolve()}/\n")
 

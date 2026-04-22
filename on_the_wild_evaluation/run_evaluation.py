@@ -7,8 +7,7 @@ Runs all in-the-wild metrics on triplets of (person, cloth, tryon) images.
 
 Metric → Input Mapping & Output Range:
 ──────────────────────────────────────
-  - VLM Score           : person + cloth + tryon (ALL THREE) → [0, 1] continuous
-  - Pose Consistency    : person + tryon (pose preservation)
+    - Pose Consistency    : person + tryon (pose preservation)
   - NIQE                : tryon ONLY (no-reference quality) → lower is better
   - MUSIQ               : tryon ONLY (no-reference quality) → higher is better
   - JEPA                : tryon ONLY (self-consistency)
@@ -50,7 +49,6 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from on_the_wild_evaluation.vlm_evaluator import VLMEvaluator
 from on_the_wild_evaluation.jepa_evaluator import JEPAEvaluator
 from on_the_wild_evaluation.pose_evaluator import PoseConsistencyEvaluator
 from on_the_wild_evaluation.clip_garment_evaluator import CLIPGarmentEvaluator
@@ -118,8 +116,7 @@ class WildEvaluationSuite:
             batch_score = mean(individual_sample_scores)
     
     Metric → Input Mapping:
-        VLM Score       : person + cloth + tryon (all three)
-        Pose Consistency: person + tryon
+    Pose Consistency: person + tryon
         NIQE            : tryon only
         MUSIQ           : tryon only
         JEPA            : tryon only
@@ -135,10 +132,10 @@ class WildEvaluationSuite:
         Args:
             device: torch device
             metrics: List of metrics to run. Default: all.
-                     Options: ["vlm", "jepa", "pose", "clip", "niqe", "musiq"]
+                     Options: ["jepa", "pose", "clip", "niqe", "musiq"]
         """
         self.device = device
-        self.metrics = metrics or ["vlm", "jepa", "pose", "clip", "niqe", "musiq"]
+        self.metrics = metrics or ["jepa", "pose", "clip", "niqe", "musiq"]
         
         print("\n" + "=" * 70)
         print("  In-the-Wild Virtual Try-On Evaluation Suite")
@@ -148,8 +145,6 @@ class WildEvaluationSuite:
         print()
         print("  Metric → Input Mapping & Output Range:")
         print("  ─────────────────────────────────────────────────────────────")
-        if "vlm" in self.metrics:
-            print("    VLM Score        : person + cloth + tryon → [0, 1] continuous")
         if "pose" in self.metrics:
             print("    Pose Consistency : person + tryon")
         if "clip" in self.metrics:
@@ -165,28 +160,24 @@ class WildEvaluationSuite:
         # Initialize evaluators
         self._evaluators = {}
         
-        if "vlm" in self.metrics:
-            print("[1/6] Loading VLM evaluator (BLIP-2)...")
-            self._evaluators["vlm"] = VLMEvaluator(device=device)
-        
         if "jepa" in self.metrics:
-            print("[2/6] Loading JEPA evaluator...")
+            print("[1/5] Loading JEPA evaluator...")
             self._evaluators["jepa"] = JEPAEvaluator(device=device)
         
         if "pose" in self.metrics:
-            print("[3/6] Loading Pose evaluator (ViTPose)...")
+            print("[2/5] Loading Pose evaluator (ViTPose)...")
             self._evaluators["pose"] = PoseConsistencyEvaluator(device=device)
         
         if "clip" in self.metrics:
-            print("[4/6] Loading CLIP Garment evaluator...")
+            print("[3/5] Loading CLIP Garment evaluator...")
             self._evaluators["clip"] = CLIPGarmentEvaluator(device=device)
         
         if "niqe" in self.metrics:
-            print("[5/6] Loading NIQE evaluator...")
+            print("[4/5] Loading NIQE evaluator...")
             self._evaluators["niqe"] = NIQEEvaluator(device=device)
         
         if "musiq" in self.metrics:
-            print("[6/6] Loading MUSIQ evaluator...")
+            print("[5/5] Loading MUSIQ evaluator...")
             self._evaluators["musiq"] = MUSIQEvaluator(device=device)
         
         print("\n✓ All evaluators loaded.\n")
@@ -214,17 +205,6 @@ class WildEvaluationSuite:
         person = person_image.unsqueeze(0) if person_image.dim() == 3 else person_image
         cloth = cloth_image.unsqueeze(0) if cloth_image.dim() == 3 else cloth_image
         tryon = tryon_image.unsqueeze(0) if tryon_image.dim() == 3 else tryon_image
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # VLM Score: person + cloth + tryon (ALL THREE)
-        # ═══════════════════════════════════════════════════════════════════════
-        if "vlm" in self._evaluators:
-            vlm_result = self._evaluators["vlm"].evaluate_single(
-                tryon_image=tryon.squeeze(0),
-                person_image=person.squeeze(0),
-                cloth_image=cloth.squeeze(0),
-            )
-            results.update({f"vlm_{k}": v for k, v in vlm_result.items()})
         
         # ═══════════════════════════════════════════════════════════════════════
         # Pose Consistency: person + tryon
@@ -290,18 +270,6 @@ class WildEvaluationSuite:
         """
         B = tryon_images.shape[0]
         all_results = [{} for _ in range(B)]
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # VLM Score: person + cloth + tryon (ALL THREE)
-        # ═══════════════════════════════════════════════════════════════════════
-        if "vlm" in self._evaluators:
-            vlm_results = self._evaluators["vlm"].evaluate_batch(
-                tryon_images=tryon_images,
-                person_images=person_images,
-                cloth_images=cloth_images,
-            )
-            for i, r in enumerate(vlm_results):
-                all_results[i].update({f"vlm_{k}": v for k, v in r.items()})
         
         # ═══════════════════════════════════════════════════════════════════════
         # Pose Consistency: person + tryon
@@ -561,7 +529,7 @@ def main():
                        default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--metrics", nargs="+", default=None,
-                       help="Metrics to run: vlm jepa pose clip niqe musiq")
+                       help="Metrics to run: jepa pose clip niqe musiq")
     parser.add_argument("--img_size", type=int, nargs=2, default=[512, 384],
                        help="Image size (H W)")
     parser.add_argument("--match_by", type=str, default="filename",

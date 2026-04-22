@@ -106,6 +106,82 @@ def _run_python(script: str, args: list, desc: str, gpus: int = 1, gpu_id: int =
     return True
 
 
+_PHOTO_EXTS = {
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".pdf", ".svg"
+}
+_VIDEO_EXTS = {
+    ".mp4", ".mov", ".avi", ".mkv", ".webm", ".gif"
+}
+_METRIC_EXTS = {
+    ".json", ".csv", ".xlsx", ".txt", ".npz"
+}
+
+
+def _snapshot_files(root: Path) -> set[str]:
+    if not root.exists():
+        return set()
+    return {
+        str(p.relative_to(root))
+        for p in root.rglob("*")
+        if p.is_file()
+    }
+
+
+def _artifact_kind(rel_path: str) -> str:
+    ext = Path(rel_path).suffix.lower()
+    if ext in _PHOTO_EXTS:
+        return "photo"
+    if ext in _VIDEO_EXTS:
+        return "video"
+    if ext in _METRIC_EXTS:
+        return "metrics"
+    return "other"
+
+
+def _report_new_artifacts(output_root: Path, before: set[str], phase_label: str):
+    after = _snapshot_files(output_root)
+    new_files = sorted(after - before)
+
+    print("\n" + "-" * 70)
+    print(f"  Artifact Report — {phase_label}")
+    print("-" * 70)
+
+    if not new_files:
+        print("  No new artifact files detected.")
+        return
+
+    by_kind = {"metrics": [], "photo": [], "video": [], "other": []}
+    for rel in new_files:
+        by_kind[_artifact_kind(rel)].append(rel)
+
+    print(f"  New files total : {len(new_files)}")
+    print(f"  Metrics files   : {len(by_kind['metrics'])}")
+    print(f"  Photos/plots    : {len(by_kind['photo'])}")
+    print(f"  Videos          : {len(by_kind['video'])}")
+    print(f"  Other           : {len(by_kind['other'])}")
+
+    def _print_group(title: str, items: list[str], limit: int = 20):
+        if not items:
+            return
+        print(f"\n  {title}:")
+        for rel in items[:limit]:
+            print(f"    - {rel}")
+        if len(items) > limit:
+            print(f"    ... and {len(items) - limit} more")
+
+    _print_group("Metrics", by_kind["metrics"], limit=30)
+    _print_group("Photos/Plots", by_kind["photo"], limit=30)
+    _print_group("Videos", by_kind["video"], limit=30)
+
+    manifest = output_root / "artifacts_manifest.txt"
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open(manifest, "a", encoding="utf-8") as f:
+        f.write(f"\n[{ts}] {phase_label}\n")
+        for rel in new_files:
+            f.write(rel + "\n")
+    print(f"\n  Manifest updated: {manifest}")
+
+
 def _parse_table_rows(output: str, title: str):
     """
     Parse the ASCII table emitted by test.py and return a list of row dicts.
@@ -572,31 +648,41 @@ def main():
 
     # ── Phase 1: Pretrained Metrics ───────────────────────────────────────
     if 1 in phases:
+        before = _snapshot_files(output_root)
         results[1] = phase1_pretrained_metrics(args)
+        _report_new_artifacts(output_root, before, "Phase 1 — Pretrained Metrics")
     else:
         print("\n  [SKIP] Phase 1: Pretrained Metrics")
 
     # ── Phase 2: CurvTON-only EDA ────────────────────────────────────────
     if 2 in phases:
+        before = _snapshot_files(output_root)
         results[2] = phase2_curvton_eda(args)
+        _report_new_artifacts(output_root, before, "Phase 2 — CurvTON EDA")
     else:
         print("\n  [SKIP] Phase 2: CurvTON EDA")
 
     # ── Phase 3: Baseline EDA ─────────────────────────────────────────────
     if 3 in phases:
+        before = _snapshot_files(output_root)
         results[3] = phase3_baseline_eda(args)
+        _report_new_artifacts(output_root, before, "Phase 3 — Baseline EDA")
     else:
         print("\n  [SKIP] Phase 3: Baseline EDA")
 
     # ── Phase 4: Comparison plots ─────────────────────────────────────────
     if 4 in phases:
+        before = _snapshot_files(output_root)
         results[4] = phase4_comparison_plots(args)
+        _report_new_artifacts(output_root, before, "Phase 4 — Comparison Plots")
     else:
         print("\n  [SKIP] Phase 4: Comparison Plots")
 
     # ── Phase 5: Radar Chart ──────────────────────────────────────────────
     if 5 in phases:
+        before = _snapshot_files(output_root)
         results[5] = phase5_radar_chart(args)
+        _report_new_artifacts(output_root, before, "Phase 5 — Radar Chart")
     else:
         print("\n  [SKIP] Phase 5: Radar Chart")
 

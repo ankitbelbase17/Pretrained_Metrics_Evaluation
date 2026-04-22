@@ -16,7 +16,6 @@ Metrics computed
   │ IS (mean ± std)              │ Inception Score                               │
   │ KID (mean ± std)             │ Kernel Inception Distance                     │
     │ Pose Error (PE)              │ MPJPE in pixels (MMPose HRNet keypoints)      │
-  │ VLM Score                    │ BLIP-2 plausibility score 1-10                │
   │ JEPA EPE                     │ Embedding Prediction Error (MSE)              │
   │ JEPA Trace Σ                 │ Tr(Cov) of target embeddings                  │
   └──────────────────────────────┴───────────────────────────────────────────────┘
@@ -35,7 +34,7 @@ Usage
       --output_dir ./results \
       --batch_size 8 \
       --device cuda \
-      [--no_vlm] [--no_jepa] [--no_pose]
+    [--no_jepa] [--no_pose]
 
   # Evaluate ALL 10 datasets in one go (requires --config):
   python evaluate.py --config configs/all_datasets.yaml
@@ -99,7 +98,6 @@ from metrics.image_metrics import (
 )
 from metrics.distribution_metrics import DistributionMetrics
 from metrics.pose_error import PoseErrorMetric
-from metrics.vlm_score import VLMScoreMetric
 from metrics.jepa_metrics import JEPAMetrics
 
 warnings.filterwarnings("ignore")
@@ -219,7 +217,6 @@ def evaluate_dataset(
     lpips_metric = LPIPSMetric(device=device)
     dist_metric  = DistributionMetrics(device=device)
     pose_metric  = PoseErrorMetric(device=device)      if cfg.get("compute_pose", True) else None
-    vlm_metric   = VLMScoreMetric(device=device)       if cfg.get("compute_vlm",  True) else None
     jepa_metric  = JEPAMetrics(device=device)          if cfg.get("compute_jepa", True) else None
 
     # Accumulators
@@ -227,8 +224,6 @@ def evaluate_dataset(
         k: [] for k in [
             "psnr", "ssim", "masked_ssim", "lpips",
             "pose_error",
-            # VLM sub-scores (S1-S4) + weighted composite
-            "vlm_s1", "vlm_s2", "vlm_s3", "vlm_s4", "vlm_score",
             "jepa_epe",
         ]
     }
@@ -267,15 +262,6 @@ def evaluate_dataset(
 
         if pose_metric:
             acc["pose_error"].extend(pose_metric.compute_batch(pred, gt))
-
-        if vlm_metric:
-            vlm_results = vlm_metric.compute_batch(pred)   # list[dict]
-            for entry in vlm_results:
-                acc["vlm_s1"].append(entry["s1"])
-                acc["vlm_s2"].append(entry["s2"])
-                acc["vlm_s3"].append(entry["s3"])
-                acc["vlm_s4"].append(entry["s4"])
-                acc["vlm_score"].append(entry["vlm_score"])
 
         if jepa_metric:
             acc["jepa_epe"].extend(jepa_metric.compute_epe_batch(person, pred))
@@ -323,12 +309,6 @@ def evaluate_dataset(
         "kid_std":        dist_results["kid_std"],
         # ── structural / semantic
         "pose_error_px":  _mean(acc["pose_error"]),
-        # VLM sub-scores (↑ higher is better, scale 1–10)
-        "vlm_s1_garment_fidelity":      _mean(acc["vlm_s1"]),
-        "vlm_s2_geometric_naturalness": _mean(acc["vlm_s2"]),
-        "vlm_s3_identity_preservation": _mean(acc["vlm_s3"]),
-        "vlm_s4_scene_coherence":       _mean(acc["vlm_s4"]),
-        "vlm_score":                    _mean(acc["vlm_score"]),
         # ── JEPA
         "jepa_epe":       _mean(acc["jepa_epe"]),
         "jepa_trace_cov": jepa_trace,
@@ -360,11 +340,6 @@ def _print_results_table(r: dict):
         ("KID mean (↓)",                    r["kid_mean"]),
         ("KID std",                         r["kid_std"]),
         ("Pose Error px (↓)",               r["pose_error_px"]),
-        ("VLM S1 Garment Fidelity (↑)",     r["vlm_s1_garment_fidelity"]),
-        ("VLM S2 Geometric Natural. (↑)",   r["vlm_s2_geometric_naturalness"]),
-        ("VLM S3 Identity Preserv. (↑)",    r["vlm_s3_identity_preservation"]),
-        ("VLM S4 Scene Coherence (↑)",      r["vlm_s4_scene_coherence"]),
-        ("VLM Score (weighted, ↑)",         r["vlm_score"]),
         ("JEPA EPE (↓)",                    r["jepa_epe"]),
         ("JEPA Tr(Sigma) (↑)",              r["jepa_trace_cov"]),
     ]
@@ -407,7 +382,6 @@ def _parse_args():
     p.add_argument("--dresscode_category", type=str, default="upper_body",
                    help="DressCode category: upper_body | lower_body | dresses")
     # ── Selective metric flags ────────────────────────────────────────────────
-    p.add_argument("--no_vlm",   action="store_true", help="Skip VLM scoring.")
     p.add_argument("--no_jepa",  action="store_true", help="Skip JEPA metrics.")
     p.add_argument("--no_pose",  action="store_true", help="Skip pose error.")
     return p.parse_args()
@@ -430,7 +404,6 @@ defaults:
   img_size: [512, 384]
   split: test
   compute_pose: true
-  compute_vlm: true
   compute_jepa: true
 
 datasets:
@@ -515,11 +488,6 @@ def _print_summary_table(all_results: List[dict]):
     cols = [
         "dataset", "psnr", "ssim", "masked_ssim", "lpips",
         "fid", "is_mean", "kid_mean", "pose_error_px",
-        "vlm_s1_garment_fidelity",
-        "vlm_s2_geometric_naturalness",
-        "vlm_s3_identity_preservation",
-        "vlm_s4_scene_coherence",
-        "vlm_score",
         "jepa_epe", "jepa_trace_cov",
     ]
     # Only keep columns that exist in at least one result dict
@@ -527,7 +495,7 @@ def _print_summary_table(all_results: List[dict]):
     df = pd.DataFrame(all_results)[avail]
     sep = "═" * max(130, len(avail) * 14)
     print("\n" + sep)
-    print("  SUMMARY — All Datasets  (VLM: S1=GarmentFidelity S2=GeomNaturalness S3=Identity S4=SceneCoherence)")
+    print("  SUMMARY — All Datasets")
     print(sep)
     print(df.to_string(index=False, float_format=lambda x: f"{x:.4f}" if isinstance(x, float) else str(x)))
     print(sep)
@@ -548,7 +516,6 @@ def main():
         split=args.split,
         dresscode_category=args.dresscode_category,
         compute_pose=not args.no_pose,
-        compute_vlm=not args.no_vlm,
         compute_jepa=not args.no_jepa,
     )
 
