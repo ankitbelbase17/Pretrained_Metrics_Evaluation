@@ -4,8 +4,9 @@ metrics/pose_error.py
 Pose-error metric for virtual try-on evaluation.
 
 Computes per-image L2 pose distance between predicted and ground-truth
-images by extracting 2-D keypoints (via HRNet / stub) and measuring the
-mean normalised Euclidean error across the 17 COCO joints.
+images by extracting 2-D keypoints via the shared MMPose HRNet
+extractor and measuring the mean normalised Euclidean error across the
+17 COCO joints.
 
 Interface
 ---------

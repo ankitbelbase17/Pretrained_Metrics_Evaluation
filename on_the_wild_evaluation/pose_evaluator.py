@@ -13,7 +13,7 @@ Metrics computed:
   - Joint Angle Consistency: Preservation of limb angles
   - Pose Vector Cosine Similarity: Overall pose structure similarity
 
-Pretrained Model: ViTPose-B (mmpose) or HRNet-W32 (fallback)
+Pretrained Model: MMPose HRNet-W32 (COCO 17 keypoints)
 """
 
 from __future__ import annotations

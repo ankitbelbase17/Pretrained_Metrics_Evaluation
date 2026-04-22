@@ -13,9 +13,7 @@ Metric 1 — Pose Diversity & Pose Articulation Complexity
 
 Pretrained model
 -----------------
-ViTPose-B (mmpose / transformers).
-Falls back to a lightweight HRNet-W32 via timm when ViTPose is unavailable.
-Falls back to random keypoints stub when neither is available (smoke-test only).
+MMPose HRNet (COCO 17 joints), via `MMPoseInferencer`.
 
 Input
 ------
@@ -32,12 +30,10 @@ dict with keys:
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import numpy as np
 import torch
-import torch.nn.functional as F
-import torchvision.transforms as T
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,34 +73,35 @@ IDX_R_HIP      = J2I["right_hip"]
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _KeypointExtractor:
-    """Tries ViTPose → HRNet (timm) → random stub."""
+    """COCO-17 keypoint extractor using MMPose HRNet."""
 
     INPUT_SIZE = (256, 192)   # H×W for most top-down pose models
 
     def __init__(self, device: str = "cpu"):
         self.device = device
         self._backend: str = "stub"
-        self._model = None
-        self._normalize = T.Normalize(
-            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-        )
+        self._inferencer = None
         self._load()
 
     # --------------------------------------------------------------------- #
     def _load(self):
-        # Try timm HRNet as a fallback (ViTPose needs mmpose which is complex)
+        # Use a proper pose estimator (HRNet) rather than a generic CNN backbone.
         try:
-            import timm
-            self._model = timm.create_model(
-                "hrnet_w32", pretrained=True, num_classes=0
-            ).to(self.device).eval()
-            self._backend = "hrnet"
-            print("[PoseMetric] Using HRNet-W32 (timm) for keypoint extraction.")
+            from mmpose.apis import MMPoseInferencer
+
+            self._inferencer = MMPoseInferencer(
+                pose2d="td-hm_hrnet-w32_8xb64-210e_coco-256x192",
+                det_model="human",
+                det_cat_ids=[0],
+                device=self.device,
+            )
+            self._backend = "mmpose_hrnet"
+            print("[PoseMetric] Using MMPose HRNet-W32 for keypoint extraction.")
             return
         except Exception as e:
             raise RuntimeError(
-                "[PoseMetric] HRNet-W32 (timm) is required but unavailable. "
-                "Install timm and ensure weights can be downloaded."
+                "[PoseMetric] MMPose HRNet backend is required but unavailable. "
+                "Install mmpose and its dependencies (mmengine/mmcv/mmdet) and ensure weights can be downloaded."
             ) from e
 
     # --------------------------------------------------------------------- #
@@ -114,43 +111,58 @@ class _KeypointExtractor:
         imgs : (B, 3, H, W)  float32  [0,1]
         Returns : (B, 17, 2) numpy array of (x, y) pixel coordinates
         """
-        B = imgs.shape[0]
-        H_in, W_in = self.INPUT_SIZE
+        if self._backend == "mmpose_hrnet":
+            all_kps: List[np.ndarray] = []
 
-        imgs_r = F.interpolate(imgs, size=self.INPUT_SIZE, mode="bilinear",
-                               align_corners=False).to(self.device)
-        imgs_r = torch.stack([self._normalize(im) for im in imgs_r])
+            for im in imgs:
+                # CHW float [0,1] -> HWC uint8 RGB for inferencer input.
+                np_img = (
+                    im.detach()
+                    .clamp(0, 1)
+                    .mul(255)
+                    .byte()
+                    .permute(1, 2, 0)
+                    .cpu()
+                    .numpy()
+                )
 
-        if self._backend == "hrnet":
-            feats = self._model.forward_features(imgs_r)   # (B, J, Hh, Wh)
-            # Clamp in case forward_features returns pooled tensor
-            if feats.ndim == 2:
-                raise RuntimeError(
-                    "[PoseMetric] HRNet output is pooled; keypoint heatmaps missing."
-                )
-            B2, J, Hh, Ww = feats.shape
-            # HRNet forward_features may return CNN feature maps (not heatmaps).
-            # Only treat channels as keypoint heatmaps when J == 17 (COCO joints).
-            if J != 17:
-                raise RuntimeError(
-                    "[PoseMetric] HRNet output does not contain 17 joint heatmaps."
-                )
-            flat = feats.view(B2, J, -1).argmax(-1)        # (B, J)
-            ys   = (flat // Ww).float() / Hh * H_in
-            xs   = (flat %  Ww).float() / Ww * W_in
-            kps  = torch.stack([xs, ys], dim=-1)           # (B, J, 2)
-            return kps.cpu().numpy()
+                result = next(self._inferencer(np_img, return_vis=False))
+                preds = result.get("predictions", [])
+
+                # MMPose output can be either [instances] or [[instances]].
+                if preds and isinstance(preds[0], list):
+                    instances = preds[0]
+                else:
+                    instances = preds
+
+                if not instances:
+                    all_kps.append(np.zeros((17, 2), dtype=np.float32))
+                    continue
+
+                def _inst_score(inst: dict) -> float:
+                    k_scores = inst.get("keypoint_scores")
+                    if k_scores is not None:
+                        arr = np.asarray(k_scores, dtype=np.float32).reshape(-1)
+                        if arr.size:
+                            return float(np.mean(arr))
+                    b_score = inst.get("bbox_score")
+                    return float(b_score) if b_score is not None else 0.0
+
+                best_inst = max(instances, key=_inst_score)
+                kps = np.asarray(best_inst.get("keypoints", []), dtype=np.float32)
+                if kps.ndim == 3:
+                    kps = kps[0]
+
+                if kps.shape != (17, 2):
+                    raise RuntimeError(
+                        f"[PoseMetric] HRNet predicted invalid keypoint shape: {kps.shape}"
+                    )
+
+                all_kps.append(kps)
+
+            return np.stack(all_kps, axis=0)
 
         raise RuntimeError("[PoseMetric] No valid pose backend available.")
-
-    def _stub(self, B: int, H: int, W: int) -> np.ndarray:
-        """Random keypoints — only used when no model is loaded."""
-        rng = np.random.default_rng(42)
-        kps = rng.uniform(0, 1, (B, 17, 2))
-        kps[:, :, 0] *= W
-        kps[:, :, 1] *= H
-        return kps.astype(np.float32)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Normalise pose

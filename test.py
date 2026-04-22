@@ -126,7 +126,7 @@ def _chain_statuses(
 def _probe_m1(device: str) -> MetricAudit:
     chains = {
         "pose_extractor": [
-            ChainModel("HRNet-W32 (timm)", "hrnet"),
+            ChainModel("MMPose HRNet-W32", "mmpose_hrnet"),
         ]
     }
     try:

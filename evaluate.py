@@ -15,7 +15,7 @@ Metrics computed
   │ FID                          │ Fréchet Inception Distance                    │
   │ IS (mean ± std)              │ Inception Score                               │
   │ KID (mean ± std)             │ Kernel Inception Distance                     │
-  │ Pose Error (PE)              │ MPJPE in pixels (HRNet keypoints)             │
+    │ Pose Error (PE)              │ MPJPE in pixels (MMPose HRNet keypoints)      │
   │ VLM Score                    │ BLIP-2 plausibility score 1-10                │
   │ JEPA EPE                     │ Embedding Prediction Error (MSE)              │
   │ JEPA Trace Σ                 │ Tr(Cov) of target embeddings                  │
