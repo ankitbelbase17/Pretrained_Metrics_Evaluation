@@ -7,7 +7,7 @@
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=400G
-#SBATCH --time=12:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=/users/dbartaula/logs/pipeline_unified_%j.log
 #SBATCH --error=/users/dbartaula/logs/pipeline_unified_%j_error.log
 
@@ -20,9 +20,9 @@
 # Disable tokenizers parallelism warning
 export TOKENIZERS_PARALLELISM=false
 
-# Activate the torch_env environment
+# Activate the torch26_env environment
 source /iopsstor/scratch/cscs/dbartaula/miniforge3/etc/profile.d/conda.sh
-conda activate torch_env
+conda activate torch26_env
 
 # Dynamically get the master node for torchrun
 MASTER_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
