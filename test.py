@@ -723,6 +723,28 @@ def _print_eda_summary(e: EDASummary):
         print(f"      note             : {n}")
 
 
+def _fmt_cell(v: object) -> str:
+    return str(v) if v is not None else "-"
+
+
+def _print_table(title: str, headers: List[str], rows: List[List[object]]):
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, c in enumerate(row):
+            widths[i] = max(widths[i], len(_fmt_cell(c)))
+
+    sep = "+-" + "-+-".join("-" * w for w in widths) + "-+"
+    hdr = "| " + " | ".join(headers[i].ljust(widths[i]) for i in range(len(headers))) + " |"
+
+    print(title)
+    print(sep)
+    print(hdr)
+    print(sep)
+    for row in rows:
+        print("| " + " | ".join(_fmt_cell(row[i]).ljust(widths[i]) for i in range(len(headers))) + " |")
+    print(sep)
+
+
 def run_checks(device: str, skip: List[str], verbose: bool) -> int:
     print("\n" + "=" * 90)
     print("  Pretrained Metrics + EDA Model/Fallback Audit")
@@ -778,6 +800,43 @@ def run_checks(device: str, skip: List[str], verbose: bool) -> int:
     print(f"  {_red('Not loaded metrics')} : {failed_count}")
     print(f"  {_yellow('Skipped checks')}    : {skipped_count}")
     print("=" * 90 + "\n")
+
+    metric_rows: List[List[object]] = []
+    for k in sorted(metric_results.keys()):
+        a = metric_results[k]
+        metric_rows.append([
+            a.key.upper(),
+            a.metric,
+            a.status,
+            a.selected_backend or "-",
+            a.fallback_used if a.fallback_used is not None else "-",
+        ])
+    if metric_rows:
+        _print_table(
+            "  Summarized Table: Metrics",
+            ["Key", "Metric", "Status", "Loaded Backend", "Fallback"],
+            metric_rows,
+        )
+        print()
+
+    eda_rows_table: List[List[object]] = []
+    for row in eda_rows:
+        if any(s.lower() in row.key.lower() for s in skip):
+            continue
+        eda_rows_table.append([
+            row.key.upper(),
+            row.plot,
+            row.status,
+            row.selected_mode,
+            row.fallback_used,
+        ])
+    if eda_rows_table:
+        _print_table(
+            "  Summarized Table: EDA",
+            ["Key", "Plot", "Status", "Selected Mode", "Fallback"],
+            eda_rows_table,
+        )
+        print()
 
     return failed_count
 
