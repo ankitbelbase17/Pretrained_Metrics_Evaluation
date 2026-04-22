@@ -9,7 +9,11 @@ import traceback
 from typing import Callable, List, Optional, Tuple
 
 import torch
-from pretrained_metrics.cache_setup import configure_model_caches, DEFAULT_MODEL_BASE
+from pretrained_metrics.cache_setup import (
+    DEFAULT_MODEL_BASE,
+    configure_model_caches,
+    ensure_hmr2_smpl_model,
+)
 
 
 def parse_common_args(description: str) -> argparse.Namespace:
@@ -55,9 +59,13 @@ def print_env(device: str):
 
 def setup_caches(base_path: str):
     info = configure_model_caches(base_path, set_home_for_hmr2=True)
+    smpl = ensure_hmr2_smpl_model(info["base_path"])
     print(f"cache_base       : {info['base_path']}")
     print(f"hf_cache         : {info['hf_hub']}")
     print(f"4dhumans_cache   : {info['fourdhumans_cache']}")
+    print(f"smpl_path_status : {smpl['status']}")
+    print(f"smpl_source      : {smpl['src']}")
+    print(f"smpl_target      : {smpl['dst']}")
 
 
 def run_attempt(

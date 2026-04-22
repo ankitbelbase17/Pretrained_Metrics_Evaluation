@@ -9,6 +9,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "pretrained_metrics"))
+from pretrained_metrics.cache_setup import DEFAULT_MODEL_BASE, ensure_hmr2_smpl_model
 
 from fallback_debug.common import (
     first_success_index,
@@ -22,6 +23,13 @@ from fallback_debug.common import (
 
 
 def try_hmr2(device: str) -> str:
+    smpl = ensure_hmr2_smpl_model(DEFAULT_MODEL_BASE)
+    if smpl["status"] == "missing_source":
+        raise FileNotFoundError(
+            f"SMPL source missing at {smpl['src']}. "
+            f"Expected target for HMR2 is {smpl['dst']}."
+        )
+
     from hmr2.models import DEFAULT_CHECKPOINT, download_models, load_hmr2
 
     import torch.serialization as _ts
@@ -31,7 +39,10 @@ def try_hmr2(device: str) -> str:
     download_models()
     model, _cfg = load_hmr2(DEFAULT_CHECKPOINT)
     model = model.to(device).eval()
-    return f"shape_backend=hmr2, checkpoint={DEFAULT_CHECKPOINT}"
+    return (
+        f"shape_backend=hmr2, checkpoint={DEFAULT_CHECKPOINT}, "
+        f"smpl_status={smpl['status']}, smpl_target={smpl['dst']}"
+    )
 
 
 def try_vit_proxy(device: str) -> str:

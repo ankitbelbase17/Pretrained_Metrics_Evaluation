@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Dict
 
@@ -58,3 +59,25 @@ def configure_model_caches(
         "home": os.environ.get("HOME", ""),
     }
 
+
+def ensure_hmr2_smpl_model(base_path: str = DEFAULT_MODEL_BASE) -> Dict[str, str]:
+    """
+    Ensure HMR2's relative lookup path `data/basicModel_...pkl` exists
+    in the current working directory by linking/copying from scratch cache.
+    """
+    filename = "basicModel_neutral_lbs_10_207_0_v1.0.0.pkl"
+    src = Path(base_path).expanduser().resolve() / ".cache" / "4DHumans" / "data" / filename
+    dst = Path.cwd() / "data" / filename
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if dst.exists():
+        return {"status": "exists", "src": str(src), "dst": str(dst)}
+    if not src.exists():
+        return {"status": "missing_source", "src": str(src), "dst": str(dst)}
+
+    try:
+        dst.symlink_to(src)
+        return {"status": "linked", "src": str(src), "dst": str(dst)}
+    except Exception:
+        shutil.copy2(src, dst)
+        return {"status": "copied", "src": str(src), "dst": str(dst)}

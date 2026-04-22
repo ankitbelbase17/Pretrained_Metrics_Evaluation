@@ -46,7 +46,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms.functional as TF
 import torchvision.transforms as T
-from pretrained_metrics.cache_setup import configure_model_caches
+from pretrained_metrics.cache_setup import configure_model_caches, ensure_hmr2_smpl_model
 
 
 # -----------------------------------------------------------------------------
@@ -90,6 +90,7 @@ class _ShapeExtractor:
     def _try_hmr2(self) -> bool:
         try:
             cache_info = configure_model_caches(set_home_for_hmr2=True)
+            smpl_info = ensure_hmr2_smpl_model(cache_info["base_path"])
             from hmr2.models import download_models, load_hmr2, DEFAULT_CHECKPOINT
 
             # PyTorch 2.6 changed torch.load default to weights_only=True.
@@ -107,6 +108,7 @@ class _ShapeExtractor:
 
             self._backend = "hmr2"
             print(f"[BodyShapeMetric] HMR2.0 loaded (cache: {cache_info['fourdhumans_cache']}).")
+            print(f"[BodyShapeMetric] SMPL path status: {smpl_info['status']} -> {smpl_info['dst']}")
             return True
 
         except ImportError:

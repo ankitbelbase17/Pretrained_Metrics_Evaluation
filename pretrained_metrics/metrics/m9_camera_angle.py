@@ -57,7 +57,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
-from pretrained_metrics.cache_setup import configure_model_caches
+from pretrained_metrics.cache_setup import configure_model_caches, ensure_hmr2_smpl_model
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -107,6 +107,7 @@ class _CameraAngleBackend:
         # ── Try HMR2.0 first ──────────────────────────────────────────────────
         try:
             cache_info = configure_model_caches(set_home_for_hmr2=True)
+            smpl_info = ensure_hmr2_smpl_model(cache_info["base_path"])
             from hmr2.models import download_models, load_hmr2, DEFAULT_CHECKPOINT
             import torch.serialization as _ts
             from omegaconf import DictConfig as _DictConfig, ListConfig as _ListConfig
@@ -117,6 +118,7 @@ class _CameraAngleBackend:
             self._hmr_model = self._hmr_model.to(self.device).eval()
             self._backend = "hmr2"
             print(f"[CameraAngle] Using HMR2.0 for camera estimation (cache: {cache_info['fourdhumans_cache']}).")
+            print(f"[CameraAngle] SMPL path status: {smpl_info['status']} -> {smpl_info['dst']}")
             return
         except Exception as e:
             print(f"[CameraAngle] HMR2.0 not available: {e}")
