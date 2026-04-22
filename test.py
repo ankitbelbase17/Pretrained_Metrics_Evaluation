@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
+from pretrained_metrics.cache_setup import configure_model_caches, DEFAULT_MODEL_BASE
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
@@ -746,9 +747,11 @@ def _print_table(title: str, headers: List[str], rows: List[List[object]]):
 
 
 def run_checks(device: str, skip: List[str], verbose: bool) -> int:
+    cache_info = configure_model_caches(DEFAULT_MODEL_BASE, set_home_for_hmr2=True)
     print("\n" + "=" * 90)
     print("  Pretrained Metrics + EDA Model/Fallback Audit")
     print(f"  device={device}  |  skip={skip}")
+    print(f"  download_base={cache_info['base_path']}")
     print("=" * 90)
 
     metric_results: Dict[str, MetricAudit] = {}

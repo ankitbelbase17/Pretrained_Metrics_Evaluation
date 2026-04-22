@@ -41,6 +41,7 @@ import sys
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pretrained_metrics.cache_setup import configure_model_caches, DEFAULT_MODEL_BASE
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Default dataset paths (edit these or override via CLI)
@@ -340,6 +341,12 @@ def parse_args():
     # ── Output ────────────────────────────────────────────────────────────
     p.add_argument("--output_dir", type=str, default=".",
                    help="Project root output directory (default: current directory)")
+    p.add_argument(
+        "--download_base",
+        type=str,
+        default=DEFAULT_MODEL_BASE,
+        help="Absolute base path for model downloads/caches (HF, torch, HMR2).",
+    )
     p.add_argument("--metrics_config", type=str,
                    default="configs/pretrained_metrics_datasets.yaml",
                    help="YAML config for pretrained metrics datasets")
@@ -376,6 +383,7 @@ def parse_args():
 def main():
     args = parse_args()
     t_start = time.time()
+    cache_info = configure_model_caches(args.download_base, set_home_for_hmr2=True)
 
     print("=" * 70)
     print("  UNIFIED PIPELINE: Pretrained Metrics + EDA")
@@ -389,6 +397,9 @@ def main():
     print(f"  Batch size       : {args.batch_size}")
     print(f"  GPUs (Parallel)  : {args.gpus}")
     print(f"  Sample ratio     : {args.sample_ratio}")
+    print(f"  Download base    : {args.download_base}")
+    print(f"  HF cache         : {cache_info['hf_hub']}")
+    print(f"  4DHumans cache   : {cache_info['fourdhumans_cache']}")
     print("=" * 70)
 
     # Determine which phases to run

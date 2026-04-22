@@ -17,6 +17,7 @@ from fallback_debug.common import (
     print_env,
     print_summary,
     run_attempt,
+    setup_caches,
 )
 
 
@@ -73,6 +74,7 @@ def try_deeplab(device: str) -> str:
 def main():
     args = parse_common_args("M2 fallback debug (Mask2Former -> SegFormer -> DeepLabV3)")
     print_env(args.device)
+    setup_caches(args.download_base)
 
     attempts = [
         ("Mask2Former (primary)", lambda: try_mask2former(args.device)),

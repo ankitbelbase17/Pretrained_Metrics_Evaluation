@@ -17,6 +17,7 @@ from fallback_debug.common import (
     print_env,
     print_summary,
     run_attempt,
+    setup_caches,
 )
 
 
@@ -43,6 +44,7 @@ def try_vit_proxy(device: str) -> str:
 def main():
     args = parse_common_args("M5 fallback debug (HMR2 -> ViT proxy)")
     print_env(args.device)
+    setup_caches(args.download_base)
 
     attempts = [
         ("HMR2.0 (primary)", lambda: try_hmr2(args.device)),
@@ -70,4 +72,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

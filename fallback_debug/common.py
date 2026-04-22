@@ -9,6 +9,7 @@ import traceback
 from typing import Callable, List, Optional, Tuple
 
 import torch
+from pretrained_metrics.cache_setup import configure_model_caches, DEFAULT_MODEL_BASE
 
 
 def parse_common_args(description: str) -> argparse.Namespace:
@@ -29,6 +30,12 @@ def parse_common_args(description: str) -> argparse.Namespace:
         action="store_true",
         help="Try all backends even after first successful one",
     )
+    p.add_argument(
+        "--download_base",
+        type=str,
+        default=DEFAULT_MODEL_BASE,
+        help="Absolute base path for model downloads/caches",
+    )
     return p.parse_args()
 
 
@@ -44,6 +51,13 @@ def print_env(device: str):
     print(f"cuda_available   : {torch.cuda.is_available()}")
     print(f"requested_device : {device}")
     print("=" * 90 + "\n")
+
+
+def setup_caches(base_path: str):
+    info = configure_model_caches(base_path, set_home_for_hmr2=True)
+    print(f"cache_base       : {info['base_path']}")
+    print(f"hf_cache         : {info['hf_hub']}")
+    print(f"4dhumans_cache   : {info['fourdhumans_cache']}")
 
 
 def run_attempt(
@@ -82,4 +96,3 @@ def first_success_index(rows: List[Tuple[str, bool, float]]) -> Optional[int]:
         if ok:
             return i
     return None
-

@@ -17,6 +17,7 @@ from fallback_debug.common import (
     print_env,
     print_summary,
     run_attempt,
+    setup_caches,
 )
 
 
@@ -62,6 +63,7 @@ def try_dino(device: str) -> str:
 def main():
     args = parse_common_args("M9 fallback debug (HMR2 -> ViTPose -> KeypointRCNN -> DINOv2)")
     print_env(args.device)
+    setup_caches(args.download_base)
 
     attempts = [
         ("HMR2.0 (primary)", lambda: try_hmr2(args.device)),

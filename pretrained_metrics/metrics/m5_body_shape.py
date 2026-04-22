@@ -46,6 +46,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms.functional as TF
 import torchvision.transforms as T
+from pretrained_metrics.cache_setup import configure_model_caches
 
 
 # -----------------------------------------------------------------------------
@@ -88,6 +89,7 @@ class _ShapeExtractor:
     # ------------------------------------------------------------------ #
     def _try_hmr2(self) -> bool:
         try:
+            cache_info = configure_model_caches(set_home_for_hmr2=True)
             from hmr2.models import download_models, load_hmr2, DEFAULT_CHECKPOINT
 
             # PyTorch 2.6 changed torch.load default to weights_only=True.
@@ -104,7 +106,7 @@ class _ShapeExtractor:
             self._hmr2_model = self._hmr2_model.to(self.device).eval()
 
             self._backend = "hmr2"
-            print("[BodyShapeMetric] HMR2.0 loaded (weights cached at ~/.cache/4DHumans/).")
+            print(f"[BodyShapeMetric] HMR2.0 loaded (cache: {cache_info['fourdhumans_cache']}).")
             return True
 
         except ImportError:

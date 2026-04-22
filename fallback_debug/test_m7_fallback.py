@@ -17,6 +17,7 @@ from fallback_debug.common import (
     print_env,
     print_summary,
     run_attempt,
+    setup_caches,
 )
 
 
@@ -60,6 +61,7 @@ def try_vit(device: str) -> str:
 def main():
     args = parse_common_args("M7 fallback debug (OpenAI CLIP -> open_clip -> HF CLIP -> ViT)")
     print_env(args.device)
+    setup_caches(args.download_base)
 
     attempts = [
         ("OpenAI CLIP ViT-B/32 (primary)", lambda: try_openai_clip(args.device)),
@@ -89,4 +91,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
