@@ -39,7 +39,6 @@ import os
 import subprocess
 import sys
 import time
-import yaml
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -115,48 +114,16 @@ def phase1_pretrained_metrics(args):
     _banner(1, 4, "Pretrained Metrics — All Datasets (YAML config)")
 
     script = "pretrained_metrics/compute_pretrained_metrics.py"
-    # ── Multi-GPU Dataset Parallelism ──
-    if args.gpus > 1:
-        print(f"\n  [Phase 1] Launching {args.gpus} datasets concurrently across GPUs...")
-        with open("configs/pretrained_metrics_datasets.yaml") as f:
-            cfg = yaml.safe_load(f)
-        datasets = cfg.get("datasets", [])
-        
-        all_ok = True
-        with ThreadPoolExecutor(max_workers=args.gpus) as executor:
-            futures = []
-            for i, ds in enumerate(datasets):
-                ds_name = ds["name"]
-                ds_args = [
-                    "--dataset", ds_name,
-                    "--output_dir", str(Path(args.output_dir) / "results" / "unified"),
-                    "--batch_size", str(args.batch_size),
-                    "--num_workers", str(args.num_workers),
-                ]
-                # Modulo GPU assignment
-                gpu_id = i % args.gpus
-                futures.append(executor.submit(_run_python, script, ds_args, f"Metrics ({ds_name})", 1, gpu_id))
-            
-            for f in as_completed(futures):
-                if not f.result():
-                    all_ok = False
-        
-        # After parallel extraction, we must run the aggregation/normalization script once
-        if all_ok:
-            print("\n  [Phase 1] All datasets completed. Aggregating Unified Complexity Index...")
-            return _run_python(script, [
-                "--config", "configs/pretrained_metrics_datasets.yaml",
-                "--output_dir", str(Path(args.output_dir) / "results" / "unified"),
-            ], "Metrics Aggregation", gpus=1)
-        return all_ok
-    else:
-        cli_args = [
-            "--config", "configs/pretrained_metrics_datasets.yaml",
-            "--output_dir", str(Path(args.output_dir) / "results" / "unified"),
-            "--batch_size", str(args.batch_size),
-            "--num_workers", str(args.num_workers),
-        ]
-        return _run_python(script, cli_args, "Pretrained Metrics (all datasets)", gpus=1)
+    # Always run in config mode:
+    # compute_pretrained_metrics.py requires either --config OR (--dataset + --root).
+    # The previous multi-GPU branch passed --dataset without --root, which is invalid.
+    cli_args = [
+        "--config", args.metrics_config,
+        "--output_dir", str(Path(args.output_dir) / "results" / "unified"),
+        "--batch_size", str(args.batch_size),
+        "--num_workers", str(args.num_workers),
+    ]
+    return _run_python(script, cli_args, "Pretrained Metrics (all datasets)", gpus=1)
 
 
 def phase2_curvton_eda(args):
