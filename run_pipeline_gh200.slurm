@@ -21,7 +21,7 @@
 export TOKENIZERS_PARALLELISM=false
 
 # Activate the torch26_env environment
-source /iopsstor/scratch/cscs/dbartaula/miniforge3/etc/profile.d/conda.sh
+source /users/dbartaula/miniforge3/etc/profile.d/conda.sh
 conda activate torch26_env
 
 # Dynamically get the master node for torchrun
