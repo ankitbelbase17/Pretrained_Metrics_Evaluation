@@ -69,25 +69,13 @@ class _FaceEmbedder:
         try:
             import insightface
             from insightface.app import FaceAnalysis
-            # Use GPU if available (onnxruntime-gpu), fall back to CPU
-            try:
-                import onnxruntime as ort
-                available = ort.get_available_providers()
-            except ImportError:
-                available = []
-            if "CUDAExecutionProvider" in available:
-                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-                ctx_id = 0
-            else:
-                providers = ["CPUExecutionProvider"]
-                ctx_id = -1
-                print("[AppearanceMetric] WARNING: onnxruntime-gpu not installed! "
-                      "InsightFace will run on CPU (very slow). "
-                      "Install with: pip install onnxruntime-gpu")
+            # Force ONNX Runtime CPU provider for stable, deterministic behavior.
+            providers = ["CPUExecutionProvider"]
+            ctx_id = -1
             self._app = FaceAnalysis(providers=providers)
             self._app.prepare(ctx_id=ctx_id, det_size=(640, 640))
             self._backend = "arcface"
-            print(f"[AppearanceMetric] Using InsightFace ArcFace ({providers[0]}).")
+            print("[AppearanceMetric] Using InsightFace ArcFace (CPUExecutionProvider).")
             return
         except Exception as e:
             print(f"[AppearanceMetric] InsightFace unavailable ({e}).")

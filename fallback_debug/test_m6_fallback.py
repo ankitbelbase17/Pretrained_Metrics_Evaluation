@@ -22,13 +22,10 @@ from fallback_debug.common import (
 
 
 def try_arcface() -> str:
-    import onnxruntime as ort
     from insightface.app import FaceAnalysis
 
-    providers = ort.get_available_providers()
-    use_cuda = "CUDAExecutionProvider" in providers
-    chosen = ["CUDAExecutionProvider", "CPUExecutionProvider"] if use_cuda else ["CPUExecutionProvider"]
-    ctx_id = 0 if use_cuda else -1
+    chosen = ["CPUExecutionProvider"]
+    ctx_id = -1
     app = FaceAnalysis(providers=chosen)
     app.prepare(ctx_id=ctx_id, det_size=(640, 640))
     return f"appearance_backend=arcface, provider={chosen[0]}"
