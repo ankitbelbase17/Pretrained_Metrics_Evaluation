@@ -25,7 +25,10 @@ def _try_object_detector(device: str) -> str:
         from transformers import DetrForObjectDetection, DetrImageProcessor
 
         _ = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
-        _ = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50").to(device).eval()
+        _ = DetrForObjectDetection.from_pretrained(
+            "facebook/detr-resnet-50",
+            use_safetensors=True,
+        ).to(device).eval()
         return "object_detector=detr"
     except Exception:
         pass
@@ -41,7 +44,8 @@ def try_mask2former(device: str) -> str:
 
     _ = Mask2FormerImageProcessor.from_pretrained("facebook/mask2former-swin-large-coco-panoptic")
     _ = Mask2FormerForUniversalSegmentation.from_pretrained(
-        "facebook/mask2former-swin-large-coco-panoptic"
+        "facebook/mask2former-swin-large-coco-panoptic",
+        use_safetensors=True,
     ).to(device).eval()
     return "segmentation_backend=mask2former"
 
@@ -50,7 +54,10 @@ def try_segformer(device: str) -> str:
     from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
     _ = SegformerImageProcessor.from_pretrained("mattmdjaga/segformer_b2_clothes")
-    _ = SegformerForSemanticSegmentation.from_pretrained("mattmdjaga/segformer_b2_clothes").to(device).eval()
+    _ = SegformerForSemanticSegmentation.from_pretrained(
+        "mattmdjaga/segformer_b2_clothes",
+        use_safetensors=True,
+    ).to(device).eval()
     det = _try_object_detector(device)
     return f"segmentation_backend=segformer, {det}"
 
@@ -94,4 +101,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

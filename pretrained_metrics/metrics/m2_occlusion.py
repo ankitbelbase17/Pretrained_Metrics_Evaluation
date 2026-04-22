@@ -225,7 +225,8 @@ class _SegBackend:
                 "facebook/mask2former-swin-large-coco-panoptic"
             )
             self._mask2former_model = Mask2FormerForUniversalSegmentation.from_pretrained(
-                "facebook/mask2former-swin-large-coco-panoptic"
+                "facebook/mask2former-swin-large-coco-panoptic",
+                use_safetensors=True,
             ).to(self.device).eval()
             self._backend = "mask2former"
             print("[OcclusionMetric] Using Mask2Former (COCO panoptic) "
@@ -243,7 +244,8 @@ class _SegBackend:
                 "mattmdjaga/segformer_b2_clothes"
             )
             self._model = SegformerForSemanticSegmentation.from_pretrained(
-                "mattmdjaga/segformer_b2_clothes"
+                "mattmdjaga/segformer_b2_clothes",
+                use_safetensors=True,
             ).to(self.device).eval()
             
             # Also try to load object detector for bags/accessories
@@ -287,7 +289,8 @@ class _SegBackend:
             from transformers import DetrForObjectDetection, DetrImageProcessor
             self._object_detector = {
                 "model": DetrForObjectDetection.from_pretrained(
-                    "facebook/detr-resnet-50"
+                    "facebook/detr-resnet-50",
+                    use_safetensors=True,
                 ).to(self.device).eval(),
                 "processor": DetrImageProcessor.from_pretrained(
                     "facebook/detr-resnet-50"
