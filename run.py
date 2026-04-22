@@ -106,6 +106,129 @@ def _run_python(script: str, args: list, desc: str, gpus: int = 1, gpu_id: int =
     return True
 
 
+def _parse_table_rows(output: str, title: str):
+    """
+    Parse the ASCII table emitted by test.py and return a list of row dicts.
+    """
+    lines = output.splitlines()
+    start_idx = None
+    for i, line in enumerate(lines):
+        if title in line:
+            start_idx = i
+            break
+    if start_idx is None:
+        return []
+
+    # Find first header row that starts with "|"
+    header_idx = None
+    for i in range(start_idx + 1, min(start_idx + 30, len(lines))):
+        if lines[i].strip().startswith("|"):
+            header_idx = i
+            break
+    if header_idx is None:
+        return []
+
+    headers = [c.strip() for c in lines[header_idx].split("|")[1:-1]]
+    rows = []
+    for i in range(header_idx + 1, len(lines)):
+        line = lines[i].strip()
+        if not line:
+            break
+        if line.startswith("+-"):
+            continue
+        if not line.startswith("|"):
+            # Next section
+            if rows:
+                break
+            continue
+        cells = [c.strip() for c in line.split("|")[1:-1]]
+        if len(cells) != len(headers):
+            continue
+        rows.append(dict(zip(headers, cells)))
+    return rows
+
+
+def _to_bool(cell: str):
+    if cell is None:
+        return None
+    v = str(cell).strip().lower()
+    if v == "true":
+        return True
+    if v == "false":
+        return False
+    return None
+
+
+def _print_no_fallback_execution_report(args):
+    """
+    Run test.py and print SUCCESS only for non-fallback executions.
+    Fallback-loaded cases are marked as BYPASS.
+    """
+    cmd = [
+        sys.executable,
+        "test.py",
+        "--device",
+        "cuda" if args.gpus > 0 else "cpu",
+        "--cache_dir",
+        str(Path(args.output_dir) / "eda_cache"),
+    ]
+    print("\n" + "=" * 70)
+    print("  No-Fallback Execution Report (Metrics + EDA)")
+    print("=" * 70)
+    print(f"  → {' '.join(cmd)}")
+
+    proc = subprocess.run(
+        cmd,
+        cwd=str(Path(__file__).parent),
+        capture_output=True,
+        text=True,
+    )
+
+    if proc.returncode not in (0, 1):
+        print("  [WARN] Could not run test.py audit for no-fallback report.")
+        if proc.stderr.strip():
+            print(f"  stderr: {proc.stderr.strip()}")
+        return
+
+    out = proc.stdout or ""
+    metric_rows = _parse_table_rows(out, "Summarized Table: Metrics")
+    eda_rows = _parse_table_rows(out, "Summarized Table: EDA")
+
+    if not metric_rows and not eda_rows:
+        print("  [WARN] Could not parse audit tables from test.py output.")
+        return
+
+    print("\n  Metrics:")
+    for row in metric_rows:
+        key = row.get("Key", "-")
+        name = row.get("Metric", "-")
+        status = row.get("Status", "-")
+        backend = row.get("Loaded Backend", "-")
+        fallback = _to_bool(row.get("Fallback", "-"))
+
+        if status == "LOADED" and fallback is False:
+            print(f"    [SUCCESS] {key} {name} | backend={backend}")
+        elif status == "LOADED" and fallback is True:
+            print(f"    [BYPASS ] {key} {name} | fallback backend={backend}")
+        else:
+            print(f"    [FAILED ] {key} {name} | status={status}")
+
+    print("\n  EDA:")
+    for row in eda_rows:
+        key = row.get("Key", "-")
+        name = row.get("Plot", "-")
+        status = row.get("Status", "-")
+        mode = row.get("Selected Mode", "-")
+        fallback = _to_bool(row.get("Fallback", "-"))
+
+        if status == "READY" and fallback is False:
+            print(f"    [SUCCESS] {key} {name} | mode={mode}")
+        elif status == "READY" and fallback is True:
+            print(f"    [BYPASS ] {key} {name} | fallback mode={mode}")
+        else:
+            print(f"    [FAILED ] {key} {name} | status={status}")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase runners
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -120,7 +243,7 @@ def phase1_pretrained_metrics(args):
     # The previous multi-GPU branch passed --dataset without --root, which is invalid.
     cli_args = [
         "--config", args.metrics_config,
-        "--output_dir", str(Path(args.output_dir) / "results" / "unified"),
+        "--output_dir", str(Path(args.output_dir) / "metrics"),
         "--batch_size", str(args.batch_size),
         "--num_workers", str(args.num_workers),
     ]
@@ -215,15 +338,25 @@ def phase4_comparison_plots(args):
             cache_dirs.append(str(npz_file))
             labels.append(f"CurvTON-{diff.capitalize()}")
 
-    # Baseline caches (from run_eda.py — stored as {name}_features.npz)
+    # Baseline caches (from run_eda.py — stored as {cache_label}_features.npz)
     for ds_name, display_name in [
         ("vitonhd", "VITON-HD"),
         ("dresscode", "DressCode"),
         ("street_tryon", "StreetTryOn"),
     ]:
-        ds_cache = cache_base / ds_name / f"{ds_name}_features.npz"
-        if ds_cache.exists():
-            cache_dirs.append(str(ds_cache))
+        ds_dir = cache_base / ds_name
+        primary = ds_dir / f"{ds_name}_features.npz"
+        if primary.exists():
+            cache_dirs.append(str(primary))
+            labels.append(display_name)
+            continue
+
+        # DressCode and other category-aware runs may save as
+        # {dataset}_{category}_features.npz (e.g. dresscode_upper_body_features.npz).
+        candidates = sorted(ds_dir.glob(f"{ds_name}_*_features.npz"))
+        if candidates:
+            pick = candidates[0]
+            cache_dirs.append(str(pick))
             labels.append(display_name)
 
     if len(labels) < 2:
@@ -288,7 +421,8 @@ def phase5_radar_chart(args):
     
     # Find the most recent comprehensive JSON
     import glob
-    json_files = glob.glob(str(Path(args.output_dir) / "pretrained_metrics_comprehensive_*.json"))
+    metrics_dir = Path(args.output_dir) / "metrics"
+    json_files = glob.glob(str(metrics_dir / "pretrained_metrics_comprehensive_*.json"))
     if not json_files:
         print("  [SKIP] No comprehensive JSON metrics found. Run Phase 1 first.")
         return True
@@ -339,8 +473,8 @@ def parse_args():
                    help="StreetTryOn test root path")
 
     # ── Output ────────────────────────────────────────────────────────────
-    p.add_argument("--output_dir", type=str, default=".",
-                   help="Project root output directory (default: current directory)")
+    p.add_argument("--output_dir", type=str, default="assets",
+                   help="Project root output directory (default: assets/)")
     p.add_argument(
         "--download_base",
         type=str,
@@ -384,11 +518,15 @@ def main():
     args = parse_args()
     t_start = time.time()
     cache_info = configure_model_caches(args.download_base, set_home_for_hmr2=True)
+    output_root = Path(args.output_dir)
+    (output_root / "metrics").mkdir(parents=True, exist_ok=True)
+    (output_root / "plots").mkdir(parents=True, exist_ok=True)
+    (output_root / "eda_cache").mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
     print("  UNIFIED PIPELINE: Pretrained Metrics + EDA")
     print("=" * 70)
-    print(f"  Output directory : {Path(args.output_dir).resolve()}")
+    print(f"  Output directory : {output_root.resolve()}")
     print(f"  Metrics config   : {args.metrics_config}")
     print(f"  CurvTON path     : {args.curvton_path}")
     print(f"  VITON-HD root    : {args.vitonhd_root}")
@@ -450,6 +588,9 @@ def main():
     else:
         print("\n  [SKIP] Phase 5: Radar Chart")
 
+    # SUCCESS is reported only for non-fallback runs; fallback cases are BYPASS.
+    _print_no_fallback_execution_report(args)
+
     # ── Summary ───────────────────────────────────────────────────────────
     elapsed = time.time() - t_start
     print("\n" + "=" * 70)
@@ -462,8 +603,8 @@ def main():
                  3: "Baseline EDA", 4: "Comparison Plots",
                  5: "Radar Chart"}
         print(f"  {status} Phase {phase_id}: {names[phase_id]}")
-    print(f"\n  Outputs saved to: {Path(args.output_dir).resolve()}")
-    print(f"    Metrics JSON  : pretrained_metrics_comprehensive_*.json")
+    print(f"\n  Outputs saved to: {output_root.resolve()}")
+    print(f"    Metrics       : metrics/")
     print(f"    Plots         : plots/")
     print("=" * 70)
 

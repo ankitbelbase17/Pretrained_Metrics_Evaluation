@@ -60,6 +60,7 @@ from pretrained_metrics.metrics.m5_body_shape      import _ShapeExtractor
 from pretrained_metrics.metrics.m6_appearance      import _FaceEmbedder
 from pretrained_metrics.metrics.m7_garment_texture import _GarmentEncoder
 from pretrained_metrics.metrics.m8_vae_latent      import _VAEEncoder
+from pretrained_metrics.metrics.m9_camera_angle    import _CameraAngleBackend
 
 
 # Import standalone dataloaders (from dataloaders/ package)
@@ -109,6 +110,13 @@ class FeatureExtractor:
         self._face_ex    = _FaceEmbedder(device)
         self._garment_ex = _GarmentEncoder(device)
         self._vae_ex     = _VAEEncoder(device)
+        self._camera_ex  = None
+        try:
+            self._camera_ex = _CameraAngleBackend(device)
+            print("[FeatureExtractor] Camera-angle backend ready.")
+        except Exception as e:
+            print(f"[FeatureExtractor] Camera-angle backend unavailable ({e}). "
+                  "P10 will use pose-proxy fallback.")
         print("[FeatureExtractor] All backends ready.")
 
     # ── single-image extraction (used by run_curvton_eda) ─────────────── #
@@ -293,6 +301,7 @@ class FeatureExtractor:
         lum_means, lum_vars, lum_maps_acc = [], [], []
         betas, face_embs, garment_embs    = [], [], []
         vae_embs = []
+        azimuths, elevations, cam_conf = [], [], []
 
         for batch in tqdm(loader, desc=f"  {dataset_name}", unit="batch"):
             person = batch["person"].float()   # (B, 3, H, W)  [0,1]
@@ -378,6 +387,22 @@ class FeatureExtractor:
             for vi in v:
                 vae_embs.append(vi.astype(np.float32))
 
+            # ── M9: Camera Angle (optional) ─────────────────────────────── #
+            if self._camera_ex is not None:
+                try:
+                    cam = self._camera_ex.estimate_angles(person)
+                    az = cam["azimuth"].detach().cpu().numpy().astype(np.float32)
+                    el = cam["elevation"].detach().cpu().numpy().astype(np.float32)
+                    cf = cam["confidence"].detach().cpu().numpy().astype(np.float32)
+                    for i in range(B):
+                        azimuths.append(az[i])
+                        elevations.append(el[i])
+                        cam_conf.append(cf[i])
+                except Exception as e:
+                    print(f"[FeatureExtractor] Camera-angle extraction failed in-batch ({e}). "
+                          "Disabling camera backend for this run.")
+                    self._camera_ex = None
+
         # ── Pack and save ───────────────────────────────────────────────── #
         data = dict(
             pose_vecs    = np.stack(pose_vecs),
@@ -394,6 +419,10 @@ class FeatureExtractor:
             garment_embs = np.stack(garment_embs),
             vae_embs     = np.stack(vae_embs),
         )
+        if azimuths:
+            data["azimuths"] = np.array(azimuths, dtype=np.float32)
+            data["elevations"] = np.array(elevations, dtype=np.float32)
+            data["camera_confidence"] = np.array(cam_conf, dtype=np.float32)
         np.savez_compressed(cp, **data)
         print(f"[FeatureExtractor] Cached → {cp}")
         return data

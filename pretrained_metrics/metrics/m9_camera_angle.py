@@ -299,7 +299,8 @@ class _CameraAngleBackend:
         azimuth = torch.atan2(R[:, 0, 2], R[:, 2, 2]) * 180 / math.pi
         elevation = torch.asin(-R[:, 1, 2].clamp(-1, 1)) * 180 / math.pi
 
-        return azimuth.squeeze(), elevation.squeeze()
+        # Keep 1-D tensors even when batch size is 1.
+        return azimuth.reshape(-1), elevation.reshape(-1)
 
     # --------------------------------------------------------------------- #
     def _vitpose_angles(self, imgs: torch.Tensor, H: int, W: int):

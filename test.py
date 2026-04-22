@@ -554,24 +554,38 @@ def _choose_pose_embedder_mode() -> Tuple[str, bool]:
     return "numpy_pca", True
 
 
-def _eda_summaries(metric_results: Dict[str, MetricAudit]) -> List[EDASummary]:
+def _infer_p10_mode_from_cache(cache_dir: str) -> Tuple[str, bool, str]:
+    """
+    Determine P10 runtime mode from cached feature files:
+      - explicit_camera_angles_from_cache if azimuths/elevations exist
+      - pose_proxy_from_pose_vecs otherwise
+    """
+    cache_path = Path(cache_dir)
+    if not cache_path.exists():
+        return "pose_proxy_from_pose_vecs", True, "cache_dir_missing"
+
+    npz_files = list(cache_path.rglob("*_features.npz"))
+    for npz in npz_files:
+        try:
+            d = np.load(npz, allow_pickle=True)
+            if ("azimuths" in d and len(d["azimuths"]) > 0) or ("azimuth" in d and len(d["azimuth"]) > 0):
+                return "explicit_camera_angles_from_cache", False, f"found:{npz.name}"
+        except Exception:
+            continue
+    return "pose_proxy_from_pose_vecs", True, "no_cached_camera_angles"
+
+
+def _eda_summaries(metric_results: Dict[str, MetricAudit], cache_dir: str) -> List[EDASummary]:
     has_sklearn = _has_module("sklearn")
 
     p1_mode, p1_fallback = _choose_pose_embedder_mode()
     p6_mode, p6_fallback = _choose_reducer_umap_tsne_pca()
     p7_mode, p7_fallback = _choose_reducer_umap_tsne_pca()
 
-    m9_loaded = metric_results.get("m9") and metric_results["m9"].status == "LOADED"
     m1_loaded = metric_results.get("m1") and metric_results["m1"].status == "LOADED"
-    if m9_loaded:
-        p10_mode = "explicit_camera_angles_from_M9"
-        p10_fallback = False
-    elif m1_loaded:
-        p10_mode = "pose_proxy_from_M1"
-        p10_fallback = True
-    else:
-        p10_mode = "unavailable (needs M9 camera or M1 pose)"
-        p10_fallback = True
+    p10_mode, p10_fallback, p10_cache_note = _infer_p10_mode_from_cache(cache_dir)
+    if not m1_loaded and p10_fallback:
+        p10_mode = "unavailable (needs pose_vecs for proxy)"
 
     summaries = [
         EDASummary(
@@ -658,11 +672,14 @@ def _eda_summaries(metric_results: Dict[str, MetricAudit]) -> List[EDASummary]:
         EDASummary(
             key="p10",
             plot="P10 Camera Angle EDA",
-            status="READY" if (m9_loaded or m1_loaded) else "NOT READY",
+            status="READY" if p10_mode != "unavailable (needs pose_vecs for proxy)" else "NOT READY",
             required_metrics=["M9 (preferred)", "M1 (fallback pose proxy)"],
             selected_mode=p10_mode,
             fallback_used=p10_fallback,
-            notes=["Uses camera angles if available, otherwise derives camera proxy from pose vectors."],
+            notes=[
+                "Uses cached camera angles when present; otherwise derives camera proxy from pose vectors.",
+                f"cache_probe={p10_cache_note}",
+            ],
         ),
     ]
     return summaries
@@ -743,7 +760,7 @@ def _print_table(title: str, headers: List[str], rows: List[List[object]]):
     print(sep)
 
 
-def run_checks(device: str, skip: List[str], verbose: bool) -> int:
+def run_checks(device: str, skip: List[str], verbose: bool, cache_dir: str) -> int:
     cache_info = configure_model_caches(DEFAULT_MODEL_BASE, set_home_for_hmr2=True)
     print("\n" + "=" * 90)
     print("  Pretrained Metrics + EDA Model/Fallback Audit")
@@ -782,7 +799,7 @@ def run_checks(device: str, skip: List[str], verbose: bool) -> int:
     # EDA summary tied to current metric statuses and local dependency availability
     print(_cyan("EDA REQUIREMENT AUDIT"))
     print("-" * 90)
-    eda_rows = _eda_summaries(metric_results)
+    eda_rows = _eda_summaries(metric_results, cache_dir=cache_dir)
     for row in eda_rows:
         if any(s.lower() in row.key.lower() for s in skip):
             print(f"  {_yellow('SKIP'):<20} [{row.key.upper()}] EDA check skipped")
@@ -862,10 +879,16 @@ def _parse():
         action="store_true",
         help="Print full traceback for failed checks",
     )
+    p.add_argument(
+        "--cache_dir",
+        type=str,
+        default="./eda_cache",
+        help="EDA cache directory used to detect explicit camera-angle arrays for P10 mode",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse()
-    n_failed = run_checks(args.device, args.skip, args.verbose)
+    n_failed = run_checks(args.device, args.skip, args.verbose, args.cache_dir)
     sys.exit(0 if n_failed == 0 else 1)

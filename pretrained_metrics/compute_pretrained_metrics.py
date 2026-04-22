@@ -71,6 +71,8 @@ from pretrained_metrics.metrics.m4_illumination   import IlluminationMetrics
 from pretrained_metrics.metrics.m5_body_shape     import BodyShapeMetrics
 from pretrained_metrics.metrics.m6_appearance     import AppearanceMetrics
 from pretrained_metrics.metrics.m7_garment_texture import GarmentTextureMetrics
+from pretrained_metrics.metrics.m8_vae_latent     import VAELatentMetric
+from pretrained_metrics.metrics.m9_camera_angle   import CameraAngleMetrics
 from pretrained_metrics.metrics.unified_index     import UnifiedComplexityIndex
 
 # Configuration management
@@ -112,6 +114,8 @@ def evaluate_one_dataset(
     run_shape   = cfg.get("run_shape", True)
     run_appear  = cfg.get("run_appear", True)
     run_garment = cfg.get("run_garment", True)
+    run_vae     = cfg.get("run_vae", True)
+    run_camera  = cfg.get("run_camera", True)
 
     # Resolve root if not provided
     if not root and config:
@@ -156,6 +160,8 @@ def evaluate_one_dataset(
     m5 = BodyShapeMetrics(device=device)      if run_shape   else None
     m6 = AppearanceMetrics(device=device)     if run_appear  else None
     m7 = GarmentTextureMetrics(device=device) if run_garment else None
+    m8 = VAELatentMetric(device=device)       if run_vae     else None
+    m9 = CameraAngleMetrics(device=device)    if run_camera  else None
 
     # ── Batch loop ────────────────────────────────────────────────────────────
     t0 = time.time()
@@ -170,6 +176,8 @@ def evaluate_one_dataset(
         if m5: m5.update(person)
         if m6: m6.update(person)
         if m7: m7.update(cloth)
+        if m8: m8.update(person)
+        if m9: m9.update(person)
 
     elapsed = time.time() - t0
 
@@ -181,6 +189,8 @@ def evaluate_one_dataset(
     r5 = m5.compute() if m5 else {}
     r6 = m6.compute() if m6 else {}
     r7 = m7.compute() if m7 else {}
+    r8 = m8.compute() if m8 else {}
+    r9 = m9.compute() if m9 else {}
 
     dresscode_cat = cfg.get("dresscode_category") if "dresscode" in dataset_name.lower() else None
     result = {
@@ -188,7 +198,7 @@ def evaluate_one_dataset(
         **({"dresscode_category": dresscode_cat} if dresscode_cat else {}),
         "n_samples": n_samples,
         "elapsed_s": round(elapsed, 2),
-        **r1, **r2, **r3, **r4, **r5, **r6, **r7,
+        **r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r9,
     }
 
     _print_result_box(result)
@@ -226,6 +236,13 @@ DISPLAY_KEYS = [
     # M7
     ("garment_diversity_logdet",    "Garment Diversity (log-det)"),
     ("garment_variance_total",      "Garment Variance Total"),
+    # M8
+    ("vae_diversity_logdet",        "VAE Diversity (log-det)"),
+    ("vae_variance_total",          "VAE Variance Total"),
+    # M9
+    ("azimuth_std",                 "Camera Azimuth Std"),
+    ("elevation_std",               "Camera Elevation Std"),
+    ("camera_diversity_score",      "Camera Diversity Score"),
 ]
 
 
@@ -271,6 +288,8 @@ def dry_run(device: str = "cpu"):
         ("BodyShape",  BodyShapeMetrics(device=device)),
         ("Appearance", AppearanceMetrics(device=device)),
         ("GarmentTex", GarmentTextureMetrics(device=device)),
+        ("VAE",        VAELatentMetric(device=device)),
+        ("Camera",     CameraAngleMetrics(device=device)),
     ]
 
     N_ITER = 3
@@ -409,6 +428,8 @@ def _parse():
     p.add_argument("--no_shape",   action="store_true")
     p.add_argument("--no_appear",  action="store_true")
     p.add_argument("--no_garment", action="store_true")
+    p.add_argument("--no_vae",     action="store_true")
+    p.add_argument("--no_camera",  action="store_true")
     return p.parse_args()
 
 
@@ -434,6 +455,8 @@ def main():
         run_shape=   not args.no_shape,
         run_appear=  not args.no_appear,
         run_garment= not args.no_garment,
+        run_vae=     not args.no_vae,
+        run_camera=  not args.no_camera,
     )
 
     output_dir = args.output_dir

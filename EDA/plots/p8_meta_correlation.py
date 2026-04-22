@@ -70,8 +70,19 @@ def _build_feature_matrix(d: dict) -> np.ndarray:
     bg_ent       = d["bg_entropy"].astype(np.float32)
     lum          = d["lum_mean"].astype(np.float32)
     shape_norm   = np.linalg.norm(d["betas"],         axis=1).astype(np.float32)
-    face_norm    = np.linalg.norm(d["face_embs"],     axis=1).astype(np.float32)
-    garment_norm = np.linalg.norm(d["garment_embs"], axis=1).astype(np.float32)
+    # Use centroid-distance diversity instead of vector norm.
+    # (Norm is near-constant for L2-normalized embeddings and carries little signal.)
+    face = d["face_embs"].astype(np.float32)
+    face = face / (np.linalg.norm(face, axis=1, keepdims=True) + 1e-12)
+    face_mu = face.mean(axis=0, keepdims=True)
+    face_mu = face_mu / (np.linalg.norm(face_mu, axis=1, keepdims=True) + 1e-12)
+    face_norm = (1.0 - np.sum(face * face_mu, axis=1)).astype(np.float32)
+
+    garment = d["garment_embs"].astype(np.float32)
+    garment = garment / (np.linalg.norm(garment, axis=1, keepdims=True) + 1e-12)
+    garment_mu = garment.mean(axis=0, keepdims=True)
+    garment_mu = garment_mu / (np.linalg.norm(garment_mu, axis=1, keepdims=True) + 1e-12)
+    garment_norm = (1.0 - np.sum(garment * garment_mu, axis=1)).astype(np.float32)
 
     X = np.stack(
         [pose_norm, occ, bg_ent, lum, shape_norm, face_norm, garment_norm],

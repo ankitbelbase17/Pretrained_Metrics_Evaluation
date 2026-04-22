@@ -389,6 +389,7 @@ class _SegBackend:
         carried_obj = torch.zeros((B, H, W), dtype=torch.bool)
         environment = torch.zeros((B, H, W), dtype=torch.bool)
         other_mask  = torch.zeros((B, H, W), dtype=torch.bool)
+        person_mask = torch.zeros((B, H, W), dtype=torch.bool)
 
         # PIL conversion on CPU (all at once)
         pils = [TF.to_pil_image(img.clamp(0, 1).cpu()).convert("RGB") for img in imgs]
@@ -423,7 +424,7 @@ class _SegBackend:
                 elif label_id in self._COCO_SPORTS:
                     carried_obj[i] |= mask
                 elif label_id == 0:
-                    pass
+                    person_mask[i] |= mask
                 else:
                     other_mask[i] |= mask
 
@@ -432,6 +433,10 @@ class _SegBackend:
             garment    = sf_masks["garment"]
             body_parts = sf_masks["body_parts"]
             accessories |= sf_masks["accessories"]
+        elif person_mask.any():
+            # If SegFormer is unavailable, use person silhouette as a stable garment proxy
+            # so occlusion ratios do not collapse to zero.
+            garment = person_mask
 
         arms = body_parts.clone()
         hair = torch.zeros((B, H, W), dtype=torch.bool)
