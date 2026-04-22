@@ -130,6 +130,8 @@ def run_checks(device: str, skip: List[str], verbose: bool) -> int:
 
     loaded: List[str] = []
     failed: List[str] = []
+    loaded_info: List[Tuple[str, str]] = []
+    failed_info: List[Tuple[str, str]] = []
     skipped = 0
 
     for name, fn in CHECKS:
@@ -145,6 +147,7 @@ def run_checks(device: str, skip: List[str], verbose: bool) -> int:
             print(f"  {_green('LOADED'):<21} [{dt:5.1f}s]  {name}")
             print(f"           -> {info}")
             loaded.append(name)
+            loaded_info.append((name, info))
         except Exception as e:
             dt = time.time() - t0
             print(f"  {_red('NOT LOADED'):<21} [{dt:5.1f}s]  {name}")
@@ -152,6 +155,7 @@ def run_checks(device: str, skip: List[str], verbose: bool) -> int:
             if verbose:
                 traceback.print_exc()
             failed.append(name)
+            failed_info.append((name, f"{type(e).__name__}: {e}"))
 
     print("\n" + "-" * 72)
     print(f"  {_green('Loaded')}     : {len(loaded)}")
@@ -164,6 +168,26 @@ def run_checks(device: str, skip: List[str], verbose: bool) -> int:
 
     print(f"  {_yellow('Skipped')}    : {skipped}")
     print("-" * 72 + "\n")
+
+    print("=" * 72)
+    print("  Final Per-Metric Status")
+    print("=" * 72)
+    if loaded_info:
+        print(f"  {_green('Loaded Metrics/Models')}")
+        for name, info in loaded_info:
+            print(f"    - {name}")
+            print(f"      info: {info}")
+    else:
+        print(f"  {_green('Loaded Metrics/Models')}: none")
+
+    if failed_info:
+        print(f"  {_red('Not Loaded Metrics/Models')}")
+        for name, info in failed_info:
+            print(f"    - {name}")
+            print(f"      reason: {info}")
+    else:
+        print(f"  {_red('Not Loaded Metrics/Models')}: none")
+    print("=" * 72 + "\n")
 
     # Return non-zero if any model failed to load.
     return len(failed)
