@@ -21,18 +21,6 @@ from fallback_debug.common import (
 )
 
 
-def try_openai_clip(device: str) -> str:
-    import clip as _oa_clip
-
-    if not hasattr(_oa_clip, "load"):
-        raise ImportError(
-            "'clip' package is not OpenAI CLIP; expected pip package openai-clip"
-        )
-    model, _pre = _oa_clip.load("ViT-B/32", device=device)
-    model.eval()
-    return "garment_backend=openai_clip"
-
-
 def try_open_clip(device: str) -> str:
     import open_clip
 
@@ -43,14 +31,6 @@ def try_open_clip(device: str) -> str:
     return "garment_backend=open_clip"
 
 
-def try_hf_clip(device: str) -> str:
-    from transformers import CLIPModel, CLIPProcessor
-
-    _ = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device).eval()
-    return f"garment_backend=hf_clip, model={model.__class__.__name__}"
-
-
 def try_vit(device: str) -> str:
     import timm
 
@@ -59,15 +39,13 @@ def try_vit(device: str) -> str:
 
 
 def main():
-    args = parse_common_args("M7 fallback debug (OpenAI CLIP -> open_clip -> HF CLIP -> ViT)")
+    args = parse_common_args("M7 fallback debug (open_clip -> ViT)")
     print_env(args.device)
     setup_caches(args.download_base)
 
     attempts = [
-        ("OpenAI CLIP ViT-B/32 (primary)", lambda: try_openai_clip(args.device)),
-        ("open_clip ViT-B/32 (fallback #1)", lambda: try_open_clip(args.device)),
-        ("HF CLIP (fallback #2)", lambda: try_hf_clip(args.device)),
-        ("ViT-B/16 proxy (fallback #3)", lambda: try_vit(args.device)),
+        ("open_clip ViT-B/32 (primary)", lambda: try_open_clip(args.device)),
+        ("ViT-B/16 proxy (fallback #1)", lambda: try_vit(args.device)),
     ]
 
     rows: List[Tuple[str, bool, float]] = []

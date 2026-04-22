@@ -11,8 +11,8 @@ where g_i ∈ R^512 is the CLIP embedding of the i-th garment image.
 
 Pretrained model
 -----------------
-CLIP ViT-B/32 (openai/clip-vit-base-patch32) via the `clip` package or
-transformers CLIPModel.  Falls back to ViT-B/16 (timm) if CLIP is absent.
+open_clip ViT-B/32.
+Falls back to ViT-B/16 (timm) proxy if open_clip is absent.
 
 Input
 ------
@@ -46,7 +46,7 @@ import torchvision.transforms.functional as TF
 class _GarmentEncoder:
     """
     Returns (B, D) garment embeddings.
-    Backend priority: openai/clip → transformers CLIPModel → ViT (timm) → stub.
+    Backend priority: open_clip → ViT (timm) → stub.
     """
 
     def __init__(self, device: str = "cpu"):
@@ -57,23 +57,6 @@ class _GarmentEncoder:
 
     # --------------------------------------------------------------------- #
     def _load(self):
-        # Try openai/clip (package: openai-clip)
-        try:
-            import clip as _oa_clip
-            if not hasattr(_oa_clip, "load"):
-                raise ImportError("'clip' package installed is not openai/clip "
-                                  "(missing 'load'). Try: pip install openai-clip")
-            self._clip, self._preprocess = _oa_clip.load(
-                "ViT-B/32", device=self.device
-            )
-            self._clip.eval()
-            self._backend = "openai_clip"
-            self.embed_dim = 512
-            print("[GarmentMetric] Using CLIP ViT-B/32 (openai) for garment embeddings.")
-            return
-        except Exception as e:
-            print(f"[GarmentMetric] openai/clip unavailable ({e}).")
-
         # Try open_clip_torch — different package name, numpy-ABI-safe
         try:
             import open_clip
@@ -87,22 +70,6 @@ class _GarmentEncoder:
             return
         except Exception as e:
             print(f"[GarmentMetric] open_clip unavailable ({e}).")
-
-        # Try HuggingFace CLIP
-        try:
-            from transformers import CLIPModel, CLIPProcessor
-            self._hf_model = CLIPModel.from_pretrained(
-                "openai/clip-vit-base-patch32"
-            ).to(self.device).eval()
-            self._hf_proc  = CLIPProcessor.from_pretrained(
-                "openai/clip-vit-base-patch32"
-            )
-            self._backend  = "hf_clip"
-            self.embed_dim = 512
-            print("[GarmentMetric] Using HuggingFace CLIP for garment embeddings.")
-            return
-        except Exception as e:
-            print(f"[GarmentMetric] HuggingFace CLIP unavailable ({e}).")
 
         # Try ViT (timm)
         try:
@@ -120,7 +87,7 @@ class _GarmentEncoder:
         except Exception as e:
             raise RuntimeError(
                 "[GarmentMetric] No valid garment encoder available. "
-                "Install openai-clip, open_clip, transformers CLIP, or timm."
+                "Install open_clip or timm."
             ) from e
 
     # --------------------------------------------------------------------- #
@@ -129,26 +96,13 @@ class _GarmentEncoder:
         """cloth_imgs : (B, 3, H, W)  float32  [0,1] → (B, D) np.ndarray"""
         B = cloth_imgs.shape[0]
 
-        if self._backend == "openai_clip":
-            return self._openai_clip_embed(cloth_imgs)
-
         if self._backend == "open_clip":
             return self._open_clip_embed(cloth_imgs)
-
-        if self._backend == "hf_clip":
-            return self._hf_clip_embed(cloth_imgs)
 
         if self._backend == "vit":
             return self._vit_embed(cloth_imgs)
 
         raise RuntimeError("[GarmentMetric] No valid garment encoder available.")
-
-    def _openai_clip_embed(self, imgs: torch.Tensor) -> np.ndarray:
-        pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in imgs]
-        inp  = torch.stack([self._preprocess(p) for p in pils]).to(self.device)
-        emb  = self._clip.encode_image(inp)
-        emb  = F.normalize(emb.float(), dim=-1)
-        return emb.cpu().numpy()
 
     def _open_clip_embed(self, imgs: torch.Tensor) -> np.ndarray:
         from PIL import Image
@@ -156,16 +110,6 @@ class _GarmentEncoder:
         inp  = torch.stack([self._oc_preprocess(p) for p in pils]).to(self.device)
         emb  = self._oc_model.encode_image(inp)
         emb  = F.normalize(emb.float(), dim=-1)
-        return emb.cpu().numpy()
-
-    def _hf_clip_embed(self, imgs: torch.Tensor) -> np.ndarray:
-        from PIL import Image
-        pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in imgs]
-        inputs = self._hf_proc(images=pils, return_tensors="pt", padding=True).to(self.device)
-        emb = self._hf_model.get_image_features(**inputs)
-        if not isinstance(emb, torch.Tensor):
-            emb = emb.pooler_output
-        emb = F.normalize(emb.float(), dim=-1)
         return emb.cpu().numpy()
 
     def _vit_embed(self, imgs: torch.Tensor) -> np.ndarray:

@@ -34,18 +34,6 @@ def try_arcface() -> str:
     return f"appearance_backend=arcface, provider={chosen[0]}"
 
 
-def try_openai_clip(device: str) -> str:
-    import clip as _oa_clip
-
-    if not hasattr(_oa_clip, "load"):
-        raise ImportError(
-            "'clip' package is not OpenAI CLIP; expected pip package openai-clip"
-        )
-    model, _pre = _oa_clip.load("ViT-B/32", device=device)
-    model.eval()
-    return "appearance_backend=clip (openai)"
-
-
 def try_open_clip(device: str) -> str:
     import open_clip
 
@@ -57,14 +45,13 @@ def try_open_clip(device: str) -> str:
 
 
 def main():
-    args = parse_common_args("M6 fallback debug (ArcFace -> OpenAI CLIP -> open_clip)")
+    args = parse_common_args("M6 fallback debug (ArcFace -> open_clip)")
     print_env(args.device)
     setup_caches(args.download_base)
 
     attempts = [
         ("InsightFace ArcFace (primary)", lambda: try_arcface()),
-        ("OpenAI CLIP ViT-B/32 (fallback #1)", lambda: try_openai_clip(args.device)),
-        ("open_clip ViT-B/32 (fallback #2)", lambda: try_open_clip(args.device)),
+        ("open_clip ViT-B/32 (fallback #1)", lambda: try_open_clip(args.device)),
     ]
 
     rows: List[Tuple[str, bool, float]] = []

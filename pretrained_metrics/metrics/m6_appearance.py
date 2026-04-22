@@ -12,7 +12,7 @@ Instead we measure embedding diversity of face regions using ArcFace.
 Pretrained model
 -----------------
 ArcFace via InsightFace (insightface package).
-Falls back to CLIP ViT-B/32 face-region encoder when InsightFace unavailable.
+Falls back to open_clip ViT-B/32 face-region encoder when InsightFace unavailable.
 Falls back to random 512-D embeddings (smoke-test stub).
 
 Input
@@ -53,7 +53,7 @@ import torchvision.transforms.functional as TF
 class _FaceEmbedder:
     """
     Returns (B, 512) face embeddings.
-    Backend priority: ArcFace (insightface) → CLIP → stub.
+    Backend priority: ArcFace (insightface) → open_clip → stub.
     """
     EMBED_DIM = 512
 
@@ -92,23 +92,6 @@ class _FaceEmbedder:
         except Exception as e:
             print(f"[AppearanceMetric] InsightFace unavailable ({e}).")
 
-        # Try openai/clip (package name: openai-clip)
-        try:
-            import clip as _oa_clip
-            if not hasattr(_oa_clip, "load"):
-                raise ImportError("'clip' package installed is not openai/clip "
-                                  "(missing 'load'). Try: pip install openai-clip")
-            self._clip_model, self._clip_preprocess = _oa_clip.load(
-                "ViT-B/32", device=self.device
-            )
-            self._clip_model.eval()
-            self._backend = "clip"
-            self.EMBED_DIM = 512
-            print("[AppearanceMetric] Using CLIP ViT-B/32 (openai) as face proxy.")
-            return
-        except Exception as e:
-            print(f"[AppearanceMetric] openai/clip unavailable ({e}).")
-
         # Try open_clip_torch (pip install open_clip_torch) — different import name,
         # unaffected by numpy ABI issues that break the transformers-based HF CLIP.
         try:
@@ -124,7 +107,7 @@ class _FaceEmbedder:
         except Exception as e:
             raise RuntimeError(
                 "[AppearanceMetric] No valid appearance backend available. "
-                "Install insightface, openai-clip, or open_clip."
+                "Install insightface or open_clip."
             ) from e
 
     # --------------------------------------------------------------------- #
@@ -145,13 +128,13 @@ class _FaceEmbedder:
         if self._backend == "arcface":
             return self._arcface_embeddings(imgs)
 
-        if self._backend in ("clip", "open_clip"):
+        if self._backend == "open_clip":
             return self._clip_embeddings(imgs)
 
         raise RuntimeError("[AppearanceMetric] No valid appearance backend available.")
 
     def _clip_embeddings(self, imgs: torch.Tensor) -> np.ndarray:
-        """Shared encoder for both openai/clip and open_clip backends."""
+        """Encode face crops with open_clip backend."""
         face_crops = torch.stack(
             [self._crop_face_region(imgs[i]) for i in range(imgs.shape[0])]
         )
@@ -160,9 +143,6 @@ class _FaceEmbedder:
             import open_clip
             inp = torch.stack([self._oc_preprocess(p) for p in pils]).to(self.device)
             emb = self._oc_model.encode_image(inp)
-        else:
-            inp = torch.stack([self._clip_preprocess(p) for p in pils]).to(self.device)
-            emb = self._clip_model.encode_image(inp)
         emb = F.normalize(emb.float(), dim=-1)
         return emb.cpu().numpy()
 

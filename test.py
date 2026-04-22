@@ -331,7 +331,6 @@ def _probe_m6(device: str) -> MetricAudit:
     chains = {
         "face_embedder": [
             ChainModel("InsightFace ArcFace", "arcface"),
-            ChainModel("OpenAI CLIP ViT-B/32", "clip"),
             ChainModel("open_clip ViT-B/32", "open_clip"),
         ]
     }
@@ -367,9 +366,7 @@ def _probe_m6(device: str) -> MetricAudit:
 def _probe_m7(device: str) -> MetricAudit:
     chains = {
         "garment_encoder": [
-            ChainModel("OpenAI CLIP ViT-B/32", "openai_clip"),
             ChainModel("open_clip ViT-B/32", "open_clip"),
-            ChainModel("HuggingFace CLIP (openai/clip-vit-base-patch32)", "hf_clip"),
             ChainModel("ViT-B/16 proxy (timm)", "vit"),
         ]
     }
@@ -383,7 +380,7 @@ def _probe_m7(device: str) -> MetricAudit:
             metric="M7 Garment Texture",
             status="LOADED",
             selected_backend=backend,
-            fallback_used=(backend != "openai_clip"),
+            fallback_used=(backend != "open_clip"),
             chains=chains,
             selected_by_chain={"garment_encoder": backend},
             notes=[f"backend={backend}"],
