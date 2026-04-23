@@ -72,6 +72,7 @@ class MetricAudit:
     notes: List[str]
     error: Optional[str] = None
     computed_values: Optional[Dict[str, object]] = None
+    elapsed_s: Optional[float] = None
 
 
 @dataclass
@@ -137,6 +138,15 @@ def _chain_statuses(
 def _collect_curvton_easy_batches(args) -> Tuple[List[Dict[str, torch.Tensor]], int, int]:
     from pretrained_metrics.dataloader import get_dataloader
 
+    def _to_bchw(x: torch.Tensor, name: str) -> torch.Tensor:
+        if x.ndim != 4:
+            raise RuntimeError(f"[{name}] Expected 4-D tensor, got shape {tuple(x.shape)}")
+        if x.shape[1] != 3 and x.shape[-1] == 3:
+            x = x.permute(0, 3, 1, 2).contiguous()
+        if x.shape[1] != 3:
+            raise RuntimeError(f"[{name}] Expected channel dimension C=3, got shape {tuple(x.shape)}")
+        return x
+
     loader = get_dataloader(
         dataset_name=args.dataset_name,
         root=args.curvton_easy_root,
@@ -149,11 +159,11 @@ def _collect_curvton_easy_batches(args) -> Tuple[List[Dict[str, torch.Tensor]], 
     batches: List[Dict[str, torch.Tensor]] = []
     n_images = 0
     for i, batch in enumerate(loader):
-        person = batch["person"].float()
-        cloth = batch["cloth"].float()
+        person = _to_bchw(batch["person"].float(), "person")
+        cloth = _to_bchw(batch["cloth"].float(), "cloth")
         batches.append({"person": person, "cloth": cloth})
         n_images += int(person.shape[0])
-        if i + 1 >= args.max_batches:
+        if args.max_batches > 0 and (i + 1) >= args.max_batches:
             break
 
     if not batches:
@@ -596,9 +606,20 @@ def _extract_eda_features_from_batches(device: str, batches: List[Dict[str, torc
 
     mask_ds = (64, 48)
 
+    def _to_bchw(x: torch.Tensor, name: str) -> torch.Tensor:
+        """Ensure image tensor is B,C,H,W with C=3."""
+        if x.ndim != 4:
+            raise RuntimeError(f"[{name}] Expected 4-D tensor, got shape {tuple(x.shape)}")
+        # If input is B,H,W,C convert to B,C,H,W.
+        if x.shape[1] != 3 and x.shape[-1] == 3:
+            x = x.permute(0, 3, 1, 2).contiguous()
+        if x.shape[1] != 3:
+            raise RuntimeError(f"[{name}] Expected channel dimension C=3, got shape {tuple(x.shape)}")
+        return x
+
     for b in batches:
-        person = b["person"]
-        cloth = b["cloth"]
+        person = _to_bchw(b["person"].float(), "person")
+        cloth = _to_bchw(b["cloth"].float(), "cloth")
         B = person.shape[0]
 
         kps_raw = kp_ext(person)
@@ -955,12 +976,9 @@ def run_checks(args) -> int:
             skipped_count += 1
             continue
         t0 = time.time()
+        audit = None
         try:
             audit = fn()
-            metric_results[audit.key] = audit
-            _print_metric_audit(audit)
-            if audit.status != "LOADED":
-                failed_count += 1
         except Exception as e:
             failed_count += 1
             print(f"  {_red('NOT LOADED'):<20} [{key.upper()}] internal checker failure")
@@ -968,6 +986,12 @@ def run_checks(args) -> int:
             if args.verbose:
                 traceback.print_exc()
         dt = time.time() - t0
+        if audit is not None:
+            audit.elapsed_s = dt
+            metric_results[audit.key] = audit
+            _print_metric_audit(audit)
+            if audit.status != "LOADED":
+                failed_count += 1
         print(f"      elapsed          : {dt:.1f}s\n")
 
     print(_cyan("EDA COMPUTE AUDIT"))
@@ -1024,11 +1048,12 @@ def run_checks(args) -> int:
             a.selected_backend or "-",
             a.fallback_used if a.fallback_used is not None else "-",
             _compact_values(a.computed_values) if a.status == "LOADED" else "NA",
+            f"{a.elapsed_s:.2f}s" if a.elapsed_s is not None else "NA",
         ])
     if metric_rows:
         _print_table(
             "  Summarized Table: Metrics",
-            ["Key", "Metric", "Status", "Loaded Backend", "Fallback", "Values"],
+            ["Key", "Metric", "Status", "Loaded Backend", "Fallback", "Values", "Time"],
             metric_rows,
         )
         print()
@@ -1079,12 +1104,13 @@ def run_checks(args) -> int:
             _compact_values(a.computed_values) if a.status == "LOADED" else "NA",
             _models_used_from_audit(a),
             _remarks_for_metric(a),
+            f"{a.elapsed_s:.2f}s" if a.elapsed_s is not None else "NA",
         ])
 
     if final_metric_rows:
         _print_table(
             "  Final Audit Table: Metrics",
-            ["Key", "Metric", "Computed", "Metric Values", "Pretrained Model Used", "Remarks"],
+            ["Key", "Metric", "Computed", "Metric Values", "Pretrained Model Used", "Remarks", "Time"],
             final_metric_rows,
         )
         print()
@@ -1130,10 +1156,15 @@ def _parse():
     )
     p.add_argument("--dataset_name", type=str, default="curvton", help="Dataset registry name")
     p.add_argument("--split", type=str, default="test")
-    p.add_argument("--batch_size", type=int, default=2)
+    p.add_argument("--batch_size", type=int, default=4)
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--img_size", type=int, nargs=2, default=[512, 384], metavar=("H", "W"))
-    p.add_argument("--max_batches", type=int, default=1, help="Number of batches for smoke compute")
+    p.add_argument(
+        "--max_batches",
+        type=int,
+        default=0,
+        help="Number of batches for compute; use 0 or negative to process full split",
+    )
     p.add_argument("--eda_out_dir", type=str, default="assets/plots/test_compute_audit")
     return p.parse_args()
 
