@@ -239,14 +239,7 @@ def plot_occlusion_heatmap(
         ax.set_xticks([])
         ax.set_yticks([])
 
-        # Mark peak occlusion location
-        peak_y, peak_x = np.unravel_index(mean_map.argmax(), mean_map.shape)
-        ax.plot(
-            peak_x, peak_y, 
-            marker="+", color="cyan", 
-            markersize=10, markeredgewidth=2,
-            zorder=10
-        )
+        # Removed peak occlusion location marker per user request.
         
         # Add panel label
         if i == 0:

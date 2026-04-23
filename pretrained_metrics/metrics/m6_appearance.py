@@ -113,30 +113,52 @@ class ParametricFaceMetric:
                     if hasattr(self, '_face_cascade') is False:
                         self._face_cascade = cv2.CascadeClassifier(cascade_path)
                     
-                    faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+                    faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(15, 15))
                     if len(faces) > 0:
                         # Grab largest box: (x, y, w, h)
                         faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
                         x, y, w, h = faces[0]
-                        margin_x = int(w * 0.25)
-                        margin_y = int(h * 0.25)
+                        # 1. Grab bounding box with generous margin for ARKit chin/hair topology
+                        margin_x = int(w * 0.35)
+                        margin_y = int(h * 0.35)
                         
                         x1 = max(0, x - margin_x)
                         y1 = max(0, y - margin_y)
                         x2 = min(W, x + w + margin_x)
                         y2 = min(H, y + h + margin_y)
                         
-                        img_crop = img_full[y1:y2, x1:x2]
+                        raw_crop = img_full[y1:y2, x1:x2]
+                        
+                        # 2. Fix MediaPipe Crash (NORM_RECT requires exact geometric square)
+                        # We must zero-pad the rectangle to form a perfect square.
+                        cH, cW, _ = raw_crop.shape
+                        side = max(cH, cW)
+                        square_crop = np.zeros((side, side, 3), dtype=np.uint8)
+                        
+                        off_y = (side - cH) // 2
+                        off_x = (side - cW) // 2
+                        square_crop[off_y:off_y+cH, off_x:off_x+cW] = raw_crop
+
+                        img_crop = square_crop
                         crop_success = True
                 except Exception:
                     pass
 
-            # If RetinaFace failed or is uninstalled, use the manual studio center-top crop
+            # If Haar Cascade failed, use the manual head-region crop
             if not crop_success:
-                crop_h = max(1, int(H * 0.35))
-                crop_w0 = max(0, int(W * 0.20))
-                crop_w1 = min(W, int(W * 0.80))
-                img_crop = img_full[:crop_h, crop_w0:crop_w1]
+                crop_h = max(1, int(H * 0.25))
+                crop_w0 = max(0, int(W * 0.25))
+                crop_w1 = min(W, int(W * 0.75))
+                raw_crop = img_full[:crop_h, crop_w0:crop_w1]
+                
+                # Must zero-pad to perfect square to prevent NORM_RECT crash
+                cH, cW, _ = raw_crop.shape
+                side = max(cH, cW)
+                square_crop = np.zeros((side, side, 3), dtype=np.uint8)
+                off_y = (side - cH) // 2
+                off_x = (side - cW) // 2
+                square_crop[off_y:off_y+cH, off_x:off_x+cW] = raw_crop
+                img_crop = square_crop
 
             # Enforce C-contiguous memory for MediaPipe C++ bindings
             img_crop_cmem = np.ascontiguousarray(img_crop)
