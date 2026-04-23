@@ -191,39 +191,77 @@ class VAELatentMetric:
     def compute(self) -> Dict[str, float]:
         """
         Compute dataset-level VAE latent diversity metrics.
+
+        Uses SVD + eigenvalue thresholding to avoid summing log(~0) over
+        thousands of near-zero dimensions in the 12288-dim latent space.
         """
         if not self._embeddings:
             return {
-                "vae_diversity_logdet": 0.0,
-                "vae_variance_total": 0.0,
-                "vae_embed_dim": self._encoder.embed_dim,
-                "n_samples": 0,
+                "vae_diversity_neg_logdet":      0.0,
+                "vae_diversity_neg_logdet_normalized":  0.0,
+                "vae_variance_total":        0.0,
+                "vae_embed_dim":             self._encoder.embed_dim,
+                "vae_effective_rank":        0,
+                "n_samples":                 0,
             }
 
         E = np.concatenate(self._embeddings, axis=0)  # (N, D)
         N, D = E.shape
 
-        # Covariance matrix
+        # Centre embeddings
         E_centered = E - E.mean(axis=0, keepdims=True)
-        cov = (E_centered.T @ E_centered) / max(N - 1, 1)
 
-        # Regularize
+        # ── SVD-based eigenvalue computation ──────────────────────────────
+        # Much more efficient than building DxD covariance (12288x12288).
+        # Using thin SVD: E_centered = U S Vt, eigenvalues = S^2 / (N-1)
+        k_max = min(N - 1, D, 256)  # cap at 256 components
+        _, S, _ = np.linalg.svd(E_centered, full_matrices=False)
+        S = S[:k_max]
+        eigvals = (S ** 2) / max(N - 1, 1)
+
+        # Total variance (sum of ALL eigenvalues = trace of cov)
+        total_var = float(eigvals.sum())
+
+        # ── Principal Components Selection (95% Variance) ────────────────────
+        # VAE latents are high-dimensional (12288) but the actual diversity
+        # lives on a much lower-dimensional manifold.
+        # Ensure we only use the principal components that explain 95% of the variance.
+        total_variance = float(eigvals.sum())
+        if total_variance > 0:
+            cumulative_var = np.cumsum(eigvals) / total_variance
+            effective_rank = int(np.searchsorted(cumulative_var, 0.95)) + 1
+        else:
+            effective_rank = 0
+
+        sig_eigvals = eigvals[:effective_rank]
+
+        if effective_rank == 0:
+            return {
+                "vae_diversity_neg_logdet":      float("inf"),
+                "vae_diversity_neg_logdet_normalized":  float("inf"),
+                "vae_variance_total":        total_var,
+                "vae_embed_dim":             D,
+                "vae_effective_rank":        0,
+                "n_samples":                 N,
+                "backend":                   self._encoder.backend_name,
+            }
+
+        # Negative log-det over significant eigenvalues only
         eps = 1e-6
-        cov += eps * np.eye(D)
+        reg_eigvals = sig_eigvals + eps
+        neg_log_det = -float(np.sum(np.log(reg_eigvals)))
 
-        # Log determinant
-        sign, logdet = np.linalg.slogdet(cov)
-        logdet = logdet if sign > 0 else -np.inf
-
-        # Total variance (trace)
-        total_var = np.trace(cov)
+        # Normalised negative log-det (per effective dimension)
+        neg_log_det_norm = neg_log_det / effective_rank
 
         return {
-            "vae_diversity_logdet": float(logdet),
-            "vae_variance_total": float(total_var),
-            "vae_embed_dim": D,
-            "n_samples": N,
-            "backend": self._encoder.backend_name,
+            "vae_diversity_neg_logdet":      neg_log_det,
+            "vae_diversity_neg_logdet_normalized":  neg_log_det_norm,
+            "vae_variance_total":        total_var,
+            "vae_embed_dim":             D,
+            "vae_effective_rank":        effective_rank,
+            "n_samples":                 N,
+            "backend":                   self._encoder.backend_name,
         }
 
     def reset(self):

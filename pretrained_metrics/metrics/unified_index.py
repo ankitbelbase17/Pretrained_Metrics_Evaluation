@@ -1,408 +1,246 @@
 """
 metrics/unified_index.py
 =========================
-Final Unified Dataset Complexity Index
-----------------------------------------
-Normalises all 7 metric families and combines them into a single score
-that is **always positive** and **higher = more complex / diverse**.
+Final Unified Dataset Complexity & Diversity Index
+---------------------------------------------------
+Takes raw output from the 9 metrics and synthesizes a comprehensive 
+dataset-level report containing:
+  - Domain Complexity (0-1)
+  - Domain Diversity (0-1)
+  - Domain Hybrid Score (Complexity * Diversity)
+  - Overall Dataset Complexity & Diversity (Weighted Averages)
 
-Pipeline (per metric k):
-    1.  z_k  = (M_k − μ_k) / σ_k              (z-score, removes raw scale)
-    2.  s_k  = sigmoid(z_k / τ)                (maps to (0, 1), always > 0)
-    3.  Final = 100 × Σ_k  w_k × s_k           (weighted average × 100)
-
-The sigmoid squashes every metric to the same (0, 1) range, so a metric with
-a raw magnitude of -800 doesn't overshadow one with magnitude 0.1.
-
-Temperature τ controls the sigmoid's sensitivity:
-    • τ = 1  ⇒ standard sigmoid, z-scores map ~linearly near 0
-    • τ > 1  ⇒ smoother / more forgiving (larger range maps to ~0.5)
-    • τ < 1  ⇒ sharper / more discriminating
-
-Baseline statistics (μ, σ) default to approximate VITON-HD values.
-
-Usage
-------
-    from metrics.unified_index import UnifiedComplexityIndex
-    uci = UnifiedComplexityIndex()
-    uci.add_dataset("my_dataset", all_metrics_dict)
-    report = uci.compute_scores()
+Normalization:
+  z = (Raw - baseline_mu) / baseline_sigma
+  score = sigmoid(z / Temperature)
 """
 
 from __future__ import annotations
-
+import math
 from typing import Dict, List, Optional
-
 import numpy as np
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Metric name → friendly label  (all ↑ = higher raw value is better)
+# Ontology mapping: Domain -> (Complexity Key, Diversity Key)
 # ─────────────────────────────────────────────────────────────────────────────
-
-METRIC_KEYS = [
-    ("pose_diversity",            "Pose Diversity (↑)"),
-    ("pose_artic_complexity",     "Pose Articulation (↑)"),
-    ("occlusion_complexity",      "Occlusion Complexity (↑)"),
-    ("illumination_complexity",   "Illumination Complexity (↑)"),
-    ("shape_diversity_logdet",    "Body Shape Diversity (↑)"),
-    ("appearance_diversity_mean", "Appearance Diversity (↑)"),
-    ("garment_diversity_logdet",  "Garment Texture Diversity (↑)"),
-]
-
-_MK_SET = {k for k, _ in METRIC_KEYS}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# VITON-HD approximate baselines  (μ)  and spread  (σ)
-# ─────────────────────────────────────────────────────────────────────────────
-# These let us z-score each metric *before* the sigmoid, so that a score of
-# 0.5 corresponds roughly to "VITON-HD level".
-#
-# σ is set to a meaningful fraction of |μ| so that ±1σ represents a real diff.
-# For metrics whose baseline μ is near 0, σ is set to a reasonable absolute
-# value so that the z-score doesn't explode.
-# ─────────────────────────────────────────────────────────────────────────────
-
-VITON_HD_BASELINES = {
-    "pose_diversity":            -15.0,
-    "pose_artic_complexity":       0.3,
-    "occlusion_complexity":        0.15,
-    "illumination_complexity":     0.05,
-    "shape_diversity_logdet":    -30.0,
-    "appearance_diversity_mean":   0.4,
-    "garment_diversity_logdet":  -20.0,
+METRIC_ONTOLOGY = {
+    "1_Pose": {
+        "name": "Pose",
+        "c_key": "pose_artic_complexity",
+        "d_key": "pose_diversity",
+        "w": 1.0
+    },
+    "2_Occlusion": {
+        "name": "Occlusion",
+        "c_key": "person_occlusion_total",
+        "d_key": "occlusion_var",   # Variance acts as a proxy for diversity here
+        "w": 1.0
+    },
+    "3_Background": {
+        "name": "Background",
+        "c_key": "bg_overall_complexity",
+        "d_key": "bg_semantic_entropy_global",
+        "w": 1.0
+    },
+    "4_Illumination": {
+        "name": "Illumination",
+        "c_key": "illumination_complexity",
+        "d_key": "luminance_var_global", 
+        "w": 1.0
+    },
+    "5_BodyShape": {
+        "name": "Body Shape",
+        "c_key": "shape_variance_total",       # Deformation magnitude proxy
+        "d_key": "shape_diversity_logdet",
+        "w": 1.0
+    },
+    "6_FaceAppearance": {
+        "name": "Face Appearance",
+        "c_key": "appearance_diversity_mean",  # Cosine dist mean = inherent difficulty
+        "d_key": "appearance_diversity_std",   # Cosine dist std = diversity
+        "w": 1.0
+    },
+    "7_GarmentTexture": {
+        "name": "Garment Texture",
+        "c_key": "garment_variance_total",     # Pattern complexity
+        "d_key": "garment_diversity_neg_logdet_normalized",
+        "w": 1.0
+    },
+    "8_VAELatent": {
+        "name": "VAE Latent",
+        "c_key": "vae_variance_total",         # Overall signal energy
+        "d_key": "vae_diversity_neg_logdet_normalized",
+        "w": 1.0
+    },
+    "9_CameraAngle": {
+        "name": "Camera Angle",
+        "c_key": "azimuth_std",                # Or elevation_mean if present
+        "d_key": "camera_diversity_score",
+        "w": 1.0
+    }
 }
 
-# σ: choose max(20% of |μ|, sensible_floor) so near-zero baselines work too
-_FLOOR = {
-    "pose_artic_complexity":     0.15,
-    "occlusion_complexity":      0.10,
-    "illumination_complexity":   0.05,
-    "appearance_diversity_mean": 0.20,
+# Standard VITON-HD-like baselines for accurate Z-scoring
+BASELINES = {
+    "pose_artic_complexity":       (0.3, 0.15),
+    "pose_diversity":              (-15.0, 5.0),
+    "person_occlusion_total":      (0.15, 0.10),
+    "occlusion_var":               (0.05, 0.05),
+    "bg_overall_complexity":       (0.5, 0.2),
+    "bg_semantic_entropy_global":  (2.5, 1.0),
+    "illumination_complexity":     (0.05, 0.05),
+    "luminance_var_global":        (0.02, 0.02),
+    "shape_variance_total":        (5.0, 2.0),
+    "shape_diversity_logdet":      (-30.0, 10.0),
+    "appearance_diversity_mean":   (0.4, 0.2),
+    "appearance_diversity_std":    (0.1, 0.05),
+    "garment_variance_total":      (20.0, 10.0),
+    "garment_diversity_neg_logdet_normalized": (5.0, 2.0),
+    "vae_variance_total":          (1000.0, 500.0),
+    "vae_diversity_neg_logdet_normalized": (10.0, 5.0),
+    "azimuth_std":                 (5.0, 5.0),
+    "camera_diversity_score":      (0.5, 0.25)
 }
 
-VITON_HD_STDS = {
-    k: max(abs(v) * 0.2, _FLOOR.get(k, 1e-6))
-    for k, v in VITON_HD_BASELINES.items()
-}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _sigmoid(x: float) -> float:
-    """Numerically stable sigmoid."""
     if x >= 0:
         return 1.0 / (1.0 + np.exp(-x))
     ex = np.exp(x)
     return ex / (1.0 + ex)
 
-
 def _isnan(v) -> bool:
     try:
-        return v != v
+        return v != v or v is None
     except Exception:
         return True
 
-
-def _f(v, signed: bool = True) -> str:
-    """Format a float for display."""
+def _f(v) -> str:
     if _isnan(v):
         return "N/A"
-    if signed:
-        return f"{v:+.4f}"
-    return f"{v:.4f}"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# UnifiedComplexityIndex
-# ─────────────────────────────────────────────────────────────────────────────
+    return f"{float(v):.4f}"
 
 class UnifiedComplexityIndex:
-    """
-    Produces a unified complexity score in (0, 100) — always positive,
-    higher = more complex / diverse.
+    def __init__(self, target_temp: float = 2.5):
+        self._target = max(target_temp, 0.5)
+        self._records = []
 
-    Uses **adaptive per-metric sigmoid temperature** so that every metric
-    retains discriminative information regardless of its z-score scale.
-
-    For each metric k the temperature τ_k is set so that the most extreme
-    z-score across all evaluated datasets maps to sigmoid(±TARGET), where
-    TARGET ≈ 2.5  →  sigmoid range ≈ [0.08, 0.92].
-
-    This means:
-        • Metrics with huge z-scores (e.g.  garment -197)  get a large τ,
-          keeping them in sigmoid's informative middle region.
-        • Metrics with small z-scores (e.g.  occlusion -0.5) get a small τ,
-          so the sigmoid can still distinguish between datasets.
-
-    Parameters
-    ----------
-    baseline_stats : dict or None
-        If None, use built-in VITON-HD baselines.
-        Otherwise supply {"metric_key": (mean, std), ...}.
-    weights : dict or None
-        Per-metric weights λ.  Equal (1/K) by default.
-    sigmoid_target : float
-        The sigmoid input magnitude that the most extreme z-score for each
-        metric is mapped to.  Default 2.5 → sigmoid range ≈ [0.08, 0.92].
-        Larger → tighter range around 0.5; smaller → more polarised.
-    """
-
-    # The sigmoid input at which we want the most extreme z-score to land.
-    # sigmoid(2.5)  ≈ 0.924
-    # sigmoid(-2.5) ≈ 0.076
-    # This keeps ALL metrics in the informative [0.08, 0.92] band.
-    _DEFAULT_TARGET = 2.5
-
-    def __init__(
-        self,
-        baseline_stats: Optional[Dict[str, tuple]] = None,
-        weights: Optional[Dict[str, float]] = None,
-        sigmoid_target: float = 2.5,
-    ):
-        if baseline_stats is None:
-            self._mu  = dict(VITON_HD_BASELINES)
-            self._sig = dict(VITON_HD_STDS)
-        else:
-            self._mu  = {k: v[0] for k, v in baseline_stats.items()}
-            self._sig = {k: max(v[1], 1e-6) for k, v in baseline_stats.items()}
-
-        n = len(METRIC_KEYS)
-        self._w = weights or {k: 1.0 / n for k, _ in METRIC_KEYS}
-        self._target = max(sigmoid_target, 0.5)    # clamp to sensible floor
-
-        self._records: List[Dict] = []
-
-    # ------------------------------------------------------------------ #
     def add_dataset(self, name: str, metrics: Dict[str, float]):
-        """
-        metrics : flat dict containing keys produced by m1–m7 compute().
-        Unknown keys are kept (for detailed sub-metric output).
-        """
         self._records.append({"dataset": name, **metrics})
 
-    # ------------------------------------------------------------------ #
     def compute_scores(self) -> List[Dict]:
-        """
-        Two-pass scoring:
+        all_keys = set()
+        for dom, struct in METRIC_ONTOLOGY.items():
+            all_keys.add(struct["c_key"])
+            all_keys.add(struct["d_key"])
 
-        Pass 1 — Compute z-scores for every (dataset, metric) pair and
-                 determine the per-metric adaptive temperature τ_k.
-
-        Pass 2 — Apply sigmoid(z / τ_k) and combine into the final score.
-
-        Returns a list of dicts, one per dataset, each containing:
-            dataset              : str
-            unified_score        : float   in (0, 100)
-            normalised_metrics   : dict    sigmoid scores per metric (0–1)
-            z_scores             : dict    raw z-scores (for reference)
-            temperatures         : dict    per-metric τ_k used
-            raw_metrics          : dict    every key that was passed in
-        """
-
-        # ── Pass 1: z-scores + per-metric max |z| ────────────────────────
-        all_z: List[Dict[str, float]] = []         # one dict per record
-        max_abs_z: Dict[str, float] = {mk: 0.0 for mk, _ in METRIC_KEYS}
-
+        # Determine dynamic temperatures based on max Z-scores
+        max_abs_z = {k: 0.0 for k in all_keys}
         for rec in self._records:
-            z_dict = {}
-            for mk, _ in METRIC_KEYS:
-                val = rec.get(mk, float("nan"))
-                mu  = self._mu.get(mk, 0.0)
-                sig = self._sig.get(mk, 1.0)
-
-                if _isnan(val):
-                    z_dict[mk] = float("nan")
-                else:
+            for k in all_keys:
+                val = rec.get(k, float('nan'))
+                if not _isnan(val):
+                    mu, sig = BASELINES.get(k, (0.0, 1.0))
+                    sig = max(sig, 1e-6)
                     z = (val - mu) / sig
-                    z_dict[mk] = z
-                    max_abs_z[mk] = max(max_abs_z[mk], abs(z))
+                    max_abs_z[k] = max(max_abs_z[k], abs(z))
 
-            all_z.append(z_dict)
+        tau = {}
+        for k in all_keys:
+            maz = max_abs_z[k]
+            tau[k] = max(maz / self._target, 1.0) if maz >= 1e-9 else 1.0
 
-        # ── Per-metric adaptive temperature ──────────────────────────────
-        # τ_k = max(|z_k|) / TARGET
-        # Floor at 1.0 so well-behaved metrics (small z) aren't over-amplified.
-        tau: Dict[str, float] = {}
-        for mk, _ in METRIC_KEYS:
-            maz = max_abs_z[mk]
-            if maz < 1e-9:
-                # All values were identical or missing → default τ
-                tau[mk] = 1.0
-            else:
-                tau[mk] = max(maz / self._target, 1.0)
-
-        # ── Pass 2: sigmoid scores + final combination ───────────────────
         out = []
-        for rec, z_dict in zip(self._records, all_z):
-            pre_norm = rec.get("category_metrics_normalized_0_1", {})
-            sig_scores = {}
-            for mk, _ in METRIC_KEYS:
-                if isinstance(pre_norm, dict) and mk in pre_norm and not _isnan(pre_norm[mk]):
-                    # Reuse precomputed per-category normalized score when provided.
-                    sig_scores[mk] = float(pre_norm[mk])
-                else:
-                    z = z_dict[mk]
-                    if _isnan(z):
-                        sig_scores[mk] = float("nan")
-                    else:
-                        sig_scores[mk] = _sigmoid(z / tau[mk])
-
-            # Weighted average of sigmoid scores (only valid ones)
-            valid_pairs = [
-                (sig_scores[mk], self._w.get(mk, 0.0))
-                for mk, _ in METRIC_KEYS
-                if not _isnan(sig_scores[mk])
-            ]
-            if valid_pairs:
-                sv, wv = zip(*valid_pairs)
-                total_w = sum(wv)
-                # Re-normalise weights so missing metrics don't deflate score
-                final_score = (
-                    sum(s * w for s, w in zip(sv, wv)) / max(total_w, 1e-12)
-                ) * 100.0            # scale to (0, 100)
-            else:
-                final_score = float("nan")
-
+        for rec in self._records:
             entry = {
-                "dataset":            rec["dataset"],
-                "unified_score":      final_score,
-                "normalised_metrics": sig_scores,
-                "z_scores":           z_dict,
-                "temperatures":       dict(tau),
-                "raw_metrics":        {
-                    k: v for k, v in rec.items()
-                    if k not in {"dataset", "dresscode_category"}
-                },
+                "dataset": rec["dataset"],
+                "domains": {},
+                "raw_metrics": {k: v for k, v in rec.items() if k != "dataset"}
             }
-            if "dresscode_category" in rec:
-                entry["dresscode_category"] = rec["dresscode_category"]
-            out.append(entry)
 
-        return out
+            total_c_weight = 0.0
+            total_d_weight = 0.0
+            sum_c = 0.0
+            sum_d = 0.0
+            sum_h = 0.0
 
-    # ------------------------------------------------------------------ #
-    def get_comprehensive_results(self, scores: List[Dict]) -> Dict:
-        """
-        Return a comprehensive dict with raw, normalized metrics, and
-        all normalization parameters — suitable for JSON serialization.
+            for dom, struct in sorted(METRIC_ONTOLOGY.items()):
+                ck = struct["c_key"]
+                dk = struct["d_key"]
+                w = struct["w"]
 
-        Structure:
-            normalization_parameters : baselines (μ, σ), temperatures (τ), weights
-            metric_definitions      : ordered list of metric keys and labels
-            datasets                : per-dataset raw + normalized + sub-metrics
-        """
-        temps = scores[0].get("temperatures", {}) if scores else {}
+                # Process Complexity
+                raw_c = rec.get(ck, float('nan'))
+                c_score = float('nan')
+                if not _isnan(raw_c):
+                    mu, sig = BASELINES.get(ck, (0.0, 1.0))
+                    z_c = (raw_c - mu) / max(sig, 1e-6)
+                    c_score = _sigmoid(z_c / tau[ck])
 
-        results = {
-            "normalization_parameters": {
-                "description": (
-                    "VITON-HD baselines used for z-score normalization. "
-                    "z = (raw - mu) / sigma, then sigmoid(z / tau) maps to (0,1). "
-                    "Final score = 100 * weighted_avg(sigmoid_scores)."
-                ),
-                "baselines_mu": {k: self._mu.get(k, 0.0) for k, _ in METRIC_KEYS},
-                "baselines_sigma": {k: self._sig.get(k, 1.0) for k, _ in METRIC_KEYS},
-                "temperatures_tau": dict(temps),
-                "sigmoid_target": self._target,
-                "weights": {k: self._w.get(k, 0.0) for k, _ in METRIC_KEYS},
-            },
-            "metric_definitions": [
-                {"key": mk, "label": label} for mk, label in METRIC_KEYS
-            ],
-            "datasets": [],
-        }
+                # Process Diversity
+                raw_d = rec.get(dk, float('nan'))
+                d_score = float('nan')
+                if not _isnan(raw_d):
+                    mu, sig = BASELINES.get(dk, (0.0, 1.0))
+                    z_d = (raw_d - mu) / max(sig, 1e-6)
+                    d_score = _sigmoid(z_d / tau[dk])
 
-        for entry in scores:
-            ds_entry = {
-                "dataset": entry["dataset"],
-                "unified_complexity_score": entry["unified_score"],
-                "per_metric": {},
-                "all_raw_sub_metrics": {
-                    k: (v if not _isnan(v) else None)
-                    for k, v in entry["raw_metrics"].items()
-                    if k not in _MK_SET and k != "n_samples"
-                },
-                "n_samples": entry["raw_metrics"].get("n_samples", 0),
-            }
-            if "dresscode_category" in entry:
-                ds_entry["dresscode_category"] = entry["dresscode_category"]
+                # Hybrid (C * D)
+                h_score = float('nan')
+                if not _isnan(c_score) and not _isnan(d_score):
+                    h_score = c_score * d_score
 
-            for mk, label in METRIC_KEYS:
-                raw  = entry["raw_metrics"].get(mk, float("nan"))
-                z    = entry["z_scores"].get(mk, float("nan"))
-                norm = entry["normalised_metrics"].get(mk, float("nan"))
-
-                ds_entry["per_metric"][mk] = {
-                    "label": label,
-                    "raw_value": raw if not _isnan(raw) else None,
-                    "z_score": z if not _isnan(z) else None,
-                    "normalized_0_1": norm if not _isnan(norm) else None,
-                    "baseline_mu": self._mu.get(mk, 0.0),
-                    "baseline_sigma": self._sig.get(mk, 1.0),
-                    "temperature_tau": temps.get(mk, 1.0),
+                entry["domains"][struct["name"]] = {
+                    "complexity": c_score,
+                    "diversity": d_score,
+                    "hybrid": h_score,
+                    "raw_c": raw_c,
+                    "raw_d": raw_d
                 }
 
-            results["datasets"].append(ds_entry)
+                # Accumulate for overall dataset scores
+                if not _isnan(c_score):
+                    sum_c += c_score * w
+                    total_c_weight += w
+                if not _isnan(d_score):
+                    sum_d += d_score * w
+                    total_d_weight += w
 
-        return results
+            entry["overall_complexity"] = (sum_c / total_c_weight) if total_c_weight > 0 else float('nan')
+            entry["overall_diversity"] = (sum_d / total_d_weight) if total_d_weight > 0 else float('nan')
+            
+            # Overall Hybrid = mean(complexities) * mean(diversities)
+            # OR mean(hybrids). We use mean(hybrids) for a truer reflection of per-domain joint performance.
+            if total_c_weight > 0 and total_d_weight > 0:
+                entry["overall_hybrid"] = entry["overall_complexity"] * entry["overall_diversity"]
+            else:
+                entry["overall_hybrid"] = float('nan')
 
-    # ------------------------------------------------------------------ #
+            out.append(entry)
+        return out
+
     def print_report(self, scores: List[Dict]):
-        """Pretty-print the unified complexity report with normalization details."""
-        W = 105
-        print("\n" + "═" * W)
-        print(f"  {'UNIFIED DATASET COMPLEXITY INDEX':^{W-4}}")
+        W = 110
+        print("\\n" + "═" * W)
+        print(f"  {'COMPREHENSIVE DATASET EVALUATION (Complexity & Diversity)':^{W-4}}")
         print("═" * W)
 
-        # ── Normalization baselines ────────────────────────────────────────
-        temps = scores[0].get("temperatures", {}) if scores else {}
-        print(f"\n  Normalization Baselines (VITON-HD reference):")
-        print(f"    {'Metric':<35} {'μ (baseline)':>14} {'σ (scale)':>12} {'τ (temp)':>12}")
-        print(f"    {'─'*35} {'─'*14} {'─'*12} {'─'*12}")
-        for mk, label in METRIC_KEYS:
-            mu  = self._mu.get(mk, 0.0)
-            sig = self._sig.get(mk, 1.0)
-            tau = temps.get(mk, 1.0)
-            print(f"    {label:<35} {mu:>14.4f} {sig:>12.4f} {tau:>12.4f}")
-
-        # ── Per-dataset results ────────────────────────────────────────────
         for d in scores:
-            ds_label = d['dataset'].upper()
-            if 'dresscode_category' in d:
-                ds_label = f"{ds_label} [{d['dresscode_category']}]"
-            print(f"\n  ► {ds_label}")
-            print(f"    {'Metric':<35} {'Raw (unnorm.)':>14}  {'z-score':>10}  {'τ':>8}  {'Score₀₋₁':>10}")
-            print(f"    {'─'*35} {'─'*14}  {'─'*10}  {'─'*8}  {'─'*10}")
+            print(f"\\n  ► DATASET: {d['dataset'].upper()}")
+            print(f"    {'Domain':<25} | {'Complexity (0-1)':>18} | {'Diversity (0-1)':>18} | {'Hybrid (C×D)':>18}")
+            print(f"    {'─'*25}─┼─{'─'*18}─┼─{'─'*18}─┼─{'─'*18}")
 
-            for mk, label in METRIC_KEYS:
-                raw = d["raw_metrics"].get(mk, float("nan"))
-                z   = d["z_scores"].get(mk, float("nan"))
-                s   = d["normalised_metrics"].get(mk, float("nan"))
-                tau = temps.get(mk, 1.0)
-                print(
-                    f"    {label:<35} {_f(raw):>14}  {_f(z):>10}  {tau:>8.2f}  {_f(s, signed=False):>10}"
-                )
+            for dom_name, ds in d["domains"].items():
+                c_str = f"{ds['complexity']:.4f}" if not math.isnan(ds['complexity']) else "N/A"
+                d_str = f"{ds['diversity']:.4f}" if not math.isnan(ds['diversity']) else "N/A"
+                h_str = f"{ds['hybrid']:.4f}" if not math.isnan(ds['hybrid']) else "N/A"
+                print(f"    {dom_name:<25} | {c_str:>18} | {d_str:>18} | {h_str:>18}")
 
-            print(f"    {'─'*85}")
-            score_str = _f(d['unified_score'], signed=False)
-            print(f"    {'OVERALL COMPLEXITY SCORE (0–100)':<35} {'':>14}  {'':>10}  {'':>8}  {score_str:>10}")
-
-            # ── Detailed sub-metrics ──────────────────────────────────────
-            other_keys = sorted(
-                k for k in d["raw_metrics"]
-                if k not in _MK_SET and k != "n_samples"
-            )
-            if other_keys:
-                print(f"\n    {'[Detailed Sub-Metrics]'}")
-                for ok in other_keys:
-                    raw_val = d["raw_metrics"][ok]
-                    try:
-                        print(f"      {ok:<40} {_f(float(raw_val)):>12}")
-                    except (ValueError, TypeError):
-                        print(f"      {ok:<40} {str(raw_val):>12}")
-
-        print("\n" + "═" * W)
+            print(f"    {'═'*89}")
+            oa_c = f"{d['overall_complexity']:.4f}" if not math.isnan(d['overall_complexity']) else "N/A"
+            oa_d = f"{d['overall_diversity']:.4f}" if not math.isnan(d['overall_diversity']) else "N/A"
+            oa_h = f"{d['overall_hybrid']:.4f}" if not math.isnan(d['overall_hybrid']) else "N/A"
+            
+            print(f"    {'OVERALL DATASET SCORE':<25} | {oa_c:>18} | {oa_d:>18} | {oa_h:>18}")
+        
+        print("\\n" + "═" * W)

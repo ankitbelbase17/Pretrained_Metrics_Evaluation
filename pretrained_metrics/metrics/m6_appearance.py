@@ -1,221 +1,178 @@
 """
 metrics/m6_appearance.py
 =========================
-Metric 6 — Appearance / Ethnicity-Proxy Diversity
----------------------------------------------------
-We do NOT classify ethnicity directly (avoids bias).
-Instead we measure embedding diversity of face regions using ArcFace.
+Metric 6 — Parametric Face Appearance (SMPL equivalent for Faces)
+-------------------------------------------------------------------
+Replaces basic embedding models (like ArcFace/AdaFace) with a 
+Parametric Face Representation using MediaPipe Face Landmarker.
+This is biologically closer to SMPL: it outputs 52 ARKit demographic/expression 
+blendshapes + 16 geometric transformation (pose) parameters per face.
 
-    D_face = (2 / (N(N-1))) * Σ_{i<j} (1 - cos_sim(f_i, f_j))
-           = mean pairwise cosine distance
-
-Pretrained model
------------------
-ArcFace via InsightFace (insightface package).
-Falls back to open_clip ViT-B/32 face-region encoder when InsightFace unavailable.
-Falls back to random 512-D embeddings (smoke-test stub).
+Diversity is measured by computing the Log-Determinant of these 68 
+parameters over the dataset, analogous to our Shape and VAE latent metrics.
+Complexity is the total variance of parametric deformation.
 
 Input
 ------
 person_imgs : torch.Tensor  (B, 3, H, W)  float32  [0, 1]
 
-Implementation note
---------------------
-We crop the upper-third of the person image as a face proxy
-when a face detector is unavailable (avoids dependency on RetinaFace).
-
 Returns (compute())
 --------------------
 dict with:
-    appearance_diversity_mean            : mean pairwise cosine distance  (raw in [0,2])
-    appearance_diversity_std             : std of pairwise cosine distances (raw)
-    appearance_diversity_mean_normalized : normalized mean in [0,1] via /2
-    appearance_diversity_std_normalized  : normalized std in [0,1] via /2
-    n_faces                      : total face embeddings collected
+    appearance_complexity                : Total variance of face parameters
+    appearance_diversity_logdet          : LogDet of the parametric covariance
+    appearance_diversity_mean            : Fallback key (for legacy systems)
+    n_faces                              : Total face embeddings collected
 """
 
 from __future__ import annotations
-
-import contextlib
-import io
 import math
-import warnings
+import os
+import urllib.request
 from typing import Dict, List
-
 import numpy as np
 import torch
-import torch.nn.functional as F
-import torchvision.transforms as T
-import torchvision.transforms.functional as TF
-
+import cv2
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Face extractor
+# Parametric Face Extractor (MediaPipe ARKit Blendshapes 52 + 16 Pose)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class _FaceEmbedder:
+class ParametricFaceMetric:
     """
-    Returns (B, 512) face embeddings.
-    Backend priority: ArcFace (insightface) → open_clip → stub.
+    Tracks parametric face states.
+    Total dimensionality per face = 52 (blendshapes) + 16 (transform) = 68.
     """
-    EMBED_DIM = 512
-
     def __init__(self, device: str = "cpu"):
         self.device = device
-        self._backend = "stub"
-        self._model   = None
+        self._blendshapes_list: List[np.ndarray] = []
         self._load()
 
-    # --------------------------------------------------------------------- #
     def _load(self):
-        # Try InsightFace ArcFace
         try:
-            import insightface
-            from insightface.app import FaceAnalysis
-            # Silence verbose InsightFace model/provider logs.
-            quiet_out = io.StringIO()
-            # Suppress noisy deprecation warning from internal face alignment path.
-            warnings.filterwarnings(
-                "ignore",
-                message=r".*estimate.*deprecated.*SimilarityTransform.*",
-                category=FutureWarning,
+            import mediapipe as mp
+            from mediapipe.tasks import python
+            from mediapipe.tasks.python import vision
+            
+            # Ensure model file exists
+            model_path = os.path.join(os.path.dirname(__file__), "face_landmarker.task")
+            if not os.path.exists(model_path):
+                print("[FaceParametric] Downloading MediaPipe Face Landmarker model...")
+                url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+                urllib.request.urlretrieve(url, model_path)
+
+            base_options = python.BaseOptions(model_asset_path=model_path)
+            options = vision.FaceLandmarkerOptions(
+                base_options=base_options,
+                output_face_blendshapes=True,
+                output_facial_transformation_matrixes=True,
+                num_faces=1
             )
-            # Force ONNX Runtime CPU provider for stable, deterministic behavior.
-            providers = ["CPUExecutionProvider"]
-            ctx_id = -1
-            with contextlib.redirect_stdout(quiet_out), contextlib.redirect_stderr(quiet_out):
-                self._app = FaceAnalysis(providers=providers)
-                # Use smaller detection size for faster, lower-memory face detection
-                self._app.prepare(ctx_id=ctx_id, det_size=(320, 320))
-            self._backend = "arcface"
-            print("[AppearanceMetric] Using InsightFace ArcFace (CPUExecutionProvider).")
-            return
+            self._detector = vision.FaceLandmarker.create_from_options(options)
+            self._mp_image = mp.Image
+            self._mp_format = mp.ImageFormat.SRGB
+            self._available = True
+            print("[FaceParametric] Loaded MediaPipe Parametric Face Model (68-D).")
         except Exception as e:
-            print(f"[AppearanceMetric] InsightFace unavailable ({e}).")
+            print(f"[FaceParametric] Could not load Parametric Face Model: {e}")
+            self._available = False
 
-        # Try open_clip_torch (pip install open_clip_torch) — different import name,
-        # unaffected by numpy ABI issues that break the transformers-based HF CLIP.
-        try:
-            import open_clip
-            self._oc_model, _, self._oc_preprocess = open_clip.create_model_and_transforms(
-                "ViT-B-32", pretrained="laion2b_s34b_b79k"
-            )
-            self._oc_model = self._oc_model.to(self.device).eval()
-            self._backend = "open_clip"
-            self.EMBED_DIM = 512
-            print("[AppearanceMetric] Using open_clip ViT-B/32 as face proxy.")
-            return
-        except Exception as e:
-            raise RuntimeError(
-                "[AppearanceMetric] No valid appearance backend available. "
-                "Install insightface or open_clip."
-            ) from e
-
-    # --------------------------------------------------------------------- #
-    def _crop_face_region(self, img_tensor: torch.Tensor) -> torch.Tensor:
-        """Crop upper ~30% of image as face proxy (H/3 rows from top)."""
-        H = img_tensor.shape[1]
-        return img_tensor[:, : max(H // 3, 1), :]
-
-    # --------------------------------------------------------------------- #
     @torch.no_grad()
-    def __call__(self, imgs: torch.Tensor) -> np.ndarray:
-        """
-        imgs : (B, 3, H, W)  float32  [0,1]
-        Returns (B, D) numpy float32.
-        """
-        B = imgs.shape[0]
-
-        if self._backend == "arcface":
-            return self._arcface_embeddings(imgs)
-
-        if self._backend == "open_clip":
-            return self._clip_embeddings(imgs)
-
-        raise RuntimeError("[AppearanceMetric] No valid appearance backend available.")
-
-    def _clip_embeddings(self, imgs: torch.Tensor) -> np.ndarray:
-        """Encode face crops with open_clip backend."""
-        face_crops = torch.stack(
-            [self._crop_face_region(imgs[i]) for i in range(imgs.shape[0])]
-        )
-        pils = [TF.to_pil_image(fc.clamp(0, 1).cpu()) for fc in face_crops]
-        if self._backend == "open_clip":
-            import open_clip
-            inp = torch.stack([self._oc_preprocess(p) for p in pils]).to(self.device)
-            emb = self._oc_model.encode_image(inp)
-        emb = F.normalize(emb.float(), dim=-1)
-        return emb.cpu().numpy()
-
-    def _arcface_embeddings(self, imgs: torch.Tensor) -> np.ndarray:
-        import cv2
-        results = []
-        for i in range(imgs.shape[0]):
-            rgb = (imgs[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-            faces = self._app.get(bgr)
-            if faces:
-                emb = faces[0].normed_embedding
-            else:
-                emb = np.zeros(512, dtype=np.float32)
-            results.append(emb)
-        return np.stack(results, axis=0)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AppearanceMetrics
-# ─────────────────────────────────────────────────────────────────────────────
-
-class AppearanceMetrics:
-
-    def __init__(self, device: str = "cpu"):
-        self._embedder = _FaceEmbedder(device)
-        self._embeddings: List[np.ndarray] = []
-
-    # ------------------------------------------------------------------ #
     def update(self, person_imgs: torch.Tensor):
-        """person_imgs : (B, 3, H, W)  float32  [0,1]"""
-        embs = self._embedder(person_imgs)          # (B, D)
-        for e in embs:
-            self._embeddings.append(e)
+        if not self._available:
+            return
 
-    # ------------------------------------------------------------------ #
+        B = person_imgs.shape[0]
+        # Convert to numpy uint8 RGB arrays
+        imgs_np = (person_imgs.permute(0, 2, 3, 1).cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+
+        for i in range(B):
+            img = imgs_np[i]
+            mp_img = self._mp_image(image_format=self._mp_format, data=img)
+            try:
+                res = self._detector.detect(mp_img)
+                if not getattr(res, "face_blendshapes", None):
+                    continue
+
+                # 52 Blendshapes representing expression/shape
+                bs = res.face_blendshapes[0] 
+                b_scores = np.array([cat.score for cat in bs], dtype=np.float32) # (52,)
+
+                # 16-element Transformation matrix (Pose: yaw, pitch, roll, trans)
+                if getattr(res, "facial_transformation_matrixes", None):
+                    t_matrix = res.facial_transformation_matrixes[0].flatten() # (16,)
+                    # Normalize transform so it mixes well with [0,1] blendshapes
+                    # The translation components [12, 13, 14] are scale dependent, let's keep robust rot components
+                    t_matrix = t_matrix / (np.linalg.norm(t_matrix) + 1e-6)
+                else:
+                    t_matrix = np.zeros(16, dtype=np.float32)
+
+                # Combine into a single 68-D parametric representation
+                params = np.concatenate([b_scores, t_matrix])
+                self._blendshapes_list.append(params)
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                pass
+
     def compute(self) -> Dict[str, float]:
-        N = len(self._embeddings)
-        if N < 2:
+        if not self._blendshapes_list:
             return {
+                "appearance_complexity": float("nan"),
                 "appearance_diversity_mean": float("nan"),
-                "appearance_diversity_std":  float("nan"),
-                "appearance_diversity_mean_normalized": float("nan"),
-                "appearance_diversity_std_normalized":  float("nan"),
-                "n_faces":                   float(N),
+                "appearance_diversity_logdet": float("nan"),
+                "n_faces": 0
             }
 
-        E   = np.stack(self._embeddings, axis=0)          # (N, D)
-        # L2-normalise
-        norms = np.linalg.norm(E, axis=1, keepdims=True) + 1e-12
-        E_n   = E / norms                                  # (N, D)
+        E = np.stack(self._blendshapes_list, axis=0) # (N, 68)
+        N, D = E.shape
 
-        # Pairwise cosine similarity matrix
-        C = E_n @ E_n.T                                    # (N, N)
-        # Extract upper triangle (i < j)
-        triu = C[np.triu_indices(N, k=1)]                  # (N*(N-1)/2,)
-        cos_dist = 1.0 - triu                              # cosine distance
+        if N < 2:
+            return {
+                "appearance_complexity": float("nan"),
+                "appearance_diversity_mean": float("nan"),
+                "appearance_diversity_logdet": float("nan"),
+                "n_faces": N
+            }
 
-        mean_raw = float(cos_dist.mean())
-        std_raw = float(cos_dist.std())
+        # ── Compute Parametric Complexity (Total Variance) ─────────────
+        mu = E.mean(axis=0, keepdims=True)
+        cov = (E - mu).T @ (E - mu) / (N - 1)
+        eigvals = np.linalg.eigvalsh(cov)
+        eigvals = np.sort(eigvals)[::-1]
+        
+        # Complexity is total variance
+        variance_total = float(np.sum(eigvals))
 
-        # 1 - cosine similarity is in [0, 2]; divide by 2 to match [0, 1] style.
-        mean_norm = float(np.clip(mean_raw / 2.0, 0.0, 1.0))
-        std_norm = float(np.clip(std_raw / 2.0, 0.0, 1.0))
+        # ── Compute Parametric Diversity (LogDet of principal cov) ─────
+        if variance_total > 0:
+            cumulative_var = np.cumsum(eigvals) / variance_total
+            effective_rank = min(int(np.searchsorted(cumulative_var, 0.95)) + 1, N - 1)
+        else:
+            effective_rank = 0
+
+        if effective_rank > 0:
+            sig_eigvals = eigvals[:effective_rank] + 1e-6
+            log_det = float(np.sum(np.log(sig_eigvals)))
+            # Provide negative log-determinant normalized so higher is consistently better
+            neg_log_det_norm = -log_det / effective_rank
+        else:
+            neg_log_det_norm = float("inf")
+
+        # Provide fallback mean score to satisfy unified index exactly
+        # Simple mean pairwise variance measure
+        mean_pwise = float(variance_total / D)
 
         return {
-            "appearance_diversity_mean": mean_raw,
-            "appearance_diversity_std": std_raw,
-            "appearance_diversity_mean_normalized": mean_norm,
-            "appearance_diversity_std_normalized": std_norm,
-            "n_faces": float(N),
+            "appearance_complexity": variance_total,     
+            "appearance_diversity_mean": neg_log_det_norm, # unified_index uses this key currently
+            "appearance_diversity_logdet": log_det,
+            "n_faces": N
         }
 
     def reset(self):
-        self._embeddings.clear()
+        self._blendshapes_list.clear()
+
+# Override the class alias to match expected namespace
+AppearanceMetrics = ParametricFaceMetric

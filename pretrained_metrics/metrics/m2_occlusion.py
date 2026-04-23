@@ -863,116 +863,172 @@ class OcclusionMetrics:
 
     def __init__(self, device: str = "cpu"):
         self._seg = _SegBackend(device=device)
-        # Per-category ratio accumulators
-        self._ratios_body:     List[float] = []
-        self._ratios_carried:  List[float] = []
-        self._ratios_accessory:List[float] = []
-        self._ratios_env:      List[float] = []
-        self._ratios_people:   List[float] = []
-        self._ratios_other:    List[float] = []
-        self._ratios_total:    List[float] = []  # union of all
+        # Per-category ratio accumulators (fraction of person bbox)
+        self._ratios_body:      List[float] = []
+        self._ratios_carried:   List[float] = []
+        self._ratios_accessory: List[float] = []
+        self._ratios_env:       List[float] = []
+        self._ratios_people:    List[float] = []
+        self._ratios_other:     List[float] = []
+        self._ratios_total:     List[float] = []   # total non-person in bbox
+        # Person-centric accumulators
+        self._garment_visibility: List[float] = []  # garment area / bbox area
+        self._person_coverage:    List[float] = []  # (garment+body) / bbox area
+        self._self_occlusion:     List[float] = []  # body / (garment+body)
 
     # ------------------------------------------------------------------ #
     def update(self, person_imgs: torch.Tensor):
         """
         person_imgs : (B, 3, H, W)  float32  [0,1]
 
-        Computes occlusion ratio per category for each image.
+        Person-centric occlusion computation:
+          1. Get panoptic masks from Mask2Former / SegFormer
+          2. Define the person region = bbox of (garment ∪ body) + 10 % pad
+          3. Within that bbox, compute the area fraction of each category
+          4. Occlusion = fraction of person bbox occupied by non-person objects
+
+        This avoids the old pitfall of multiplying mutually-exclusive panoptic
+        masks (which always gives ≈ 0).
         """
         masks = self._seg.segment(person_imgs)
+        B, _, H, W = person_imgs.shape
 
-        G = masks["garment"].float()  # (B, H, W)
+        G         = masks["garment"].float()
+        body      = masks.get("body_parts",  masks.get("arms", torch.zeros_like(G))).float()
+        carried   = masks.get("carried_obj", torch.zeros_like(G)).float()
+        accessory = masks.get("accessories", torch.zeros_like(G)).float()
+        env       = masks.get("environment", torch.zeros_like(G)).float()
+        people    = masks.get("other_people",torch.zeros_like(G)).float()
+        other     = masks.get("other",       torch.zeros_like(G)).float()
 
-        # Comprehensive occlusion sources
-        body      = masks.get("body_parts",   masks.get("arms", torch.zeros_like(G))).float()
-        carried   = masks.get("carried_obj",  torch.zeros_like(G)).float()
-        accessory = masks.get("accessories",  torch.zeros_like(G)).float()
-        env       = masks.get("environment",  torch.zeros_like(G)).float()
-        people    = masks.get("other_people", torch.zeros_like(G)).float()
-        other     = masks.get("other",        torch.zeros_like(G)).float()
-
-        # Legacy support: if new keys missing, fall back to old keys
+        # Legacy fallback
         if body.sum() == 0 and "arms" in masks:
             arms = masks["arms"].float()
             hair = masks.get("hair", torch.zeros_like(G)).float()
             body = ((arms + hair) > 0).float()
 
-        # Total occluder: union of all categories
-        all_occluders = ((body + carried + accessory + env + people + other) > 0).float()
-
-        B = G.shape[0]
         for i in range(B):
-            g_area = G[i].sum().item()
-            if g_area < 1:
-                # No garment detected
-                self._ratios_body.append(0.0)
-                self._ratios_carried.append(0.0)
-                self._ratios_accessory.append(0.0)
-                self._ratios_env.append(0.0)
-                self._ratios_people.append(0.0)
-                self._ratios_other.append(0.0)
-                self._ratios_total.append(0.0)
+            # ── Define person region via bounding box ────────────────────
+            person_core = ((G[i] + body[i]) > 0)          # bool (H,W)
+            if person_core.sum() < 10:
+                self._append_zeros()
                 continue
 
-            # Per-category overlap with garment
-            self._ratios_body.append(float(min((G[i] * body[i]).sum().item() / g_area, 1.0)))
-            self._ratios_carried.append(float(min((G[i] * carried[i]).sum().item() / g_area, 1.0)))
-            self._ratios_accessory.append(float(min((G[i] * accessory[i]).sum().item() / g_area, 1.0)))
-            self._ratios_env.append(float(min((G[i] * env[i]).sum().item() / g_area, 1.0)))
-            self._ratios_people.append(float(min((G[i] * people[i]).sum().item() / g_area, 1.0)))
-            self._ratios_other.append(float(min((G[i] * other[i]).sum().item() / g_area, 1.0)))
+            rows = person_core.any(dim=1).nonzero(as_tuple=True)[0]
+            cols = person_core.any(dim=0).nonzero(as_tuple=True)[0]
+            r0, r1 = rows[0].item(), rows[-1].item()
+            c0, c1 = cols[0].item(), cols[-1].item()
 
-            # Total occlusion (union, not sum)
-            total_overlap = (G[i] * all_occluders[i]).sum().item()
-            self._ratios_total.append(float(min(total_overlap / g_area, 1.0)))
+            # 10 % padding around person
+            pr = max(1, int((r1 - r0) * 0.10))
+            pc = max(1, int((c1 - c0) * 0.10))
+            r0 = max(0, r0 - pr);  r1 = min(H - 1, r1 + pr)
+            c0 = max(0, c0 - pc);  c1 = min(W - 1, c1 + pc)
+
+            bbox_area = float((r1 - r0 + 1) * (c1 - c0 + 1))
+
+            # ── Areas inside person bbox ─────────────────────────────────
+            g_in   = G[i][r0:r1+1, c0:c1+1].sum().item()
+            b_in   = body[i][r0:r1+1, c0:c1+1].sum().item()
+            ca_in  = carried[i][r0:r1+1, c0:c1+1].sum().item()
+            ac_in  = accessory[i][r0:r1+1, c0:c1+1].sum().item()
+            en_in  = env[i][r0:r1+1, c0:c1+1].sum().item()
+            pe_in  = people[i][r0:r1+1, c0:c1+1].sum().item()
+            ot_in  = other[i][r0:r1+1, c0:c1+1].sum().item()
+
+            person_px   = g_in + b_in
+            occluder_px = ca_in + ac_in + en_in + pe_in + ot_in
+            
+            # The user requested to "eliminate background" from the denominator.
+            # Base area = only pixels belonging to the person or to occluding objects.
+            base_area = float(person_px + occluder_px)
+            if base_area < 1.0:
+                base_area = 1.0
+
+            # ── Per-category ratios (fraction of foreground) ────────────
+            self._ratios_body.append(     float(b_in   / base_area))
+            self._ratios_carried.append(  float(ca_in  / base_area))
+            self._ratios_accessory.append(float(ac_in  / base_area))
+            self._ratios_env.append(      float(en_in  / base_area))
+            self._ratios_people.append(   float(pe_in  / base_area))
+            self._ratios_other.append(    float(ot_in  / base_area))
+            self._ratios_total.append(    float(occluder_px / base_area))
+
+            # ── Person-centric metrics ───────────────────────────────────
+            self._garment_visibility.append(float(g_in / base_area))
+            self._person_coverage.append(float(person_px / base_area))
+            if person_px > 0:
+                self._self_occlusion.append(float(b_in / person_px))
+            else:
+                self._self_occlusion.append(0.0)
+
+    def _append_zeros(self):
+        """Append zero values when no person is detected."""
+        self._ratios_body.append(0.0)
+        self._ratios_carried.append(0.0)
+        self._ratios_accessory.append(0.0)
+        self._ratios_env.append(0.0)
+        self._ratios_people.append(0.0)
+        self._ratios_other.append(0.0)
+        self._ratios_total.append(0.0)
+        self._garment_visibility.append(0.0)
+        self._person_coverage.append(0.0)
+        self._self_occlusion.append(0.0)
 
     # ------------------------------------------------------------------ #
     def compute(self) -> Dict[str, float]:
         """
-        Returns comprehensive occlusion statistics:
-        - Per-category mean occlusion ratios
-        - Total occlusion mean/variance/complexity (C_occ)
+        Returns person-centric occlusion statistics.
+
+        Overall metrics (all computed within the person bounding box):
+          person_occlusion_total  — non-person objects / person bbox area
+          person_visibility       — garment area / person bbox area
+          person_coverage         — (garment + body) / person bbox area
+          self_occlusion          — body-parts / (garment + body)
+          occlusion_complexity    — mean + var  (legacy)
+
+        Per-category breakdown (fraction of person bbox):
+          occlusion_body_parts, occlusion_carried_objects, etc.
         """
         if not self._ratios_total:
+            nan = float("nan")
             return {
-                # Legacy keys
-                "occlusion_mean":              float("nan"),
-                "occlusion_var":               float("nan"),
-                "occlusion_complexity":        float("nan"),
-                # Per-category breakdown
-                "occlusion_body_parts":        float("nan"),
-                "occlusion_carried_objects":   float("nan"),
-                "occlusion_accessories":       float("nan"),
-                "occlusion_environment":       float("nan"),
-                "occlusion_other_people":      float("nan"),
-                "occlusion_other":             float("nan"),
+                "person_occlusion_total":    nan,
+                "person_visibility":         nan,
+                "person_coverage":           nan,
+                "self_occlusion":            nan,
+                "occlusion_mean":            nan,
+                "occlusion_var":             nan,
+                "occlusion_complexity":      nan,
+                "occlusion_body_parts":      nan,
+                "occlusion_carried_objects": nan,
+                "occlusion_accessories":     nan,
+                "occlusion_environment":     nan,
+                "occlusion_other_people":    nan,
+                "occlusion_other":           nan,
             }
 
-        # Per-category means
-        body_mean      = float(np.array(self._ratios_body).mean())
-        carried_mean   = float(np.array(self._ratios_carried).mean())
-        accessory_mean = float(np.array(self._ratios_accessory).mean())
-        env_mean       = float(np.array(self._ratios_env).mean())
-        people_mean    = float(np.array(self._ratios_people).mean())
-        other_mean     = float(np.array(self._ratios_other).mean())
-
-        # Total statistics (backward compatible)
         arr_total = np.array(self._ratios_total)
         total_mean = float(arr_total.mean())
         total_var  = float(arr_total.var())
 
         return {
-            # Legacy keys (backward compatible)
-            "occlusion_mean":              total_mean,
-            "occlusion_var":               total_var,
-            "occlusion_complexity":        total_mean + total_var,
-            # Per-category breakdown
-            "occlusion_body_parts":        body_mean,
-            "occlusion_carried_objects":   carried_mean,
-            "occlusion_accessories":       accessory_mean,
-            "occlusion_environment":       env_mean,
-            "occlusion_other_people":      people_mean,
-            "occlusion_other":             other_mean,
+            # ── Overall person-centric metrics ────────────────────────────
+            "person_occlusion_total":    total_mean,
+            "person_visibility":         float(np.array(self._garment_visibility).mean()),
+            "person_coverage":           float(np.array(self._person_coverage).mean()),
+            "self_occlusion":            float(np.array(self._self_occlusion).mean()),
+            # ── Legacy keys ───────────────────────────────────────────────
+            "occlusion_mean":            total_mean,
+            "occlusion_var":             total_var,
+            "occlusion_complexity":      total_mean + total_var,
+            # ── Per-category breakdown (fraction of person bbox) ──────────
+            "occlusion_body_parts":      float(np.array(self._ratios_body).mean()),
+            "occlusion_carried_objects": float(np.array(self._ratios_carried).mean()),
+            "occlusion_accessories":     float(np.array(self._ratios_accessory).mean()),
+            "occlusion_environment":     float(np.array(self._ratios_env).mean()),
+            "occlusion_other_people":    float(np.array(self._ratios_people).mean()),
+            "occlusion_other":           float(np.array(self._ratios_other).mean()),
         }
 
     def reset(self):
@@ -983,3 +1039,6 @@ class OcclusionMetrics:
         self._ratios_people.clear()
         self._ratios_other.clear()
         self._ratios_total.clear()
+        self._garment_visibility.clear()
+        self._person_coverage.clear()
+        self._self_occlusion.clear()

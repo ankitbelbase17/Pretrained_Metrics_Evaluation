@@ -157,9 +157,11 @@ class GarmentTextureMetrics:
         N = len(self._embeddings)
         if N < 2:
             return {
-                "garment_diversity_logdet": float("nan"),
-                "garment_variance_total":   float("nan"),
-                "garment_embed_dim":        float(D),
+                "garment_diversity_neg_logdet":      float("nan"),
+                "garment_diversity_neg_logdet_normalized":  float("nan"),
+                "garment_variance_total":        float("nan"),
+                "garment_embed_dim":             float(D),
+                "garment_effective_rank":         float("nan"),
             }
 
         E  = np.stack(self._embeddings, axis=0)        # (N, D)
@@ -167,26 +169,48 @@ class GarmentTextureMetrics:
         Ec = E - mu                                     # centred (N, D)
 
         # ── PCA via thin SVD ──────────────────────────────────────────────────
-        # Ec = U S Vt  →  eigenvalues of Cov = S² / (N-1)
-        # We keep only the top-k components where k = min(N-1, D, n_components).
-        # This avoids summing log over hundreds of near-zero null-space dims
-        # that arise because (a) N-1 < D and/or (b) L2 normalisation constrains
-        # embeddings to a low-dimensional sub-manifold.
-        k = min(N - 1, D, self.n_components)
-        _, S, _ = np.linalg.svd(Ec, full_matrices=False)   # S shape: (min(N,D),)
-        S = S[:k]                                           # top-k singular values
-        eigvals = (S ** 2) / max(N - 1, 1)                 # (k,) eigenvalues
+        k_max = min(N - 1, D, self.n_components)
+        _, S, _ = np.linalg.svd(Ec, full_matrices=False)
+        S = S[:k_max]
+        eigvals = (S ** 2) / max(N - 1, 1)
 
-        # Light absolute regularisation (just prevents log(0) for tiny eigvals)
-        reg_eigvals = eigvals + self.eps
+        # ── Principal Components Selection (95% Variance) ────────────────────
+        # L2-normalised embeddings lie on a low-dimensional manifold.
+        # Ensure we only use the principal components that explain 95% of the variance
+        # to compute log-determinant safely.
+        total_variance = float(eigvals.sum())
+        if total_variance > 0:
+            cumulative_var = np.cumsum(eigvals) / total_variance
+            # Find how many components needed to reach 95% variance
+            effective_rank = int(np.searchsorted(cumulative_var, 0.95)) + 1
+        else:
+            effective_rank = 0
 
-        log_det   = float(np.sum(np.log(reg_eigvals)))
-        total_var = float(eigvals.sum())
+        sig_eigvals = eigvals[:effective_rank]
+
+        if effective_rank == 0:
+            return {
+                "garment_diversity_neg_logdet":      float("inf"),
+                "garment_diversity_neg_logdet_normalized":  float("inf"),
+                "garment_variance_total":        float(eigvals.sum()),
+                "garment_embed_dim":             float(k_max),
+                "garment_effective_rank":         0.0,
+            }
+
+        # Negative log-det over significant eigenvalues only
+        reg_eigvals = sig_eigvals + self.eps
+        neg_log_det = -float(np.sum(np.log(reg_eigvals)))
+        total_var   = float(eigvals.sum())
+
+        # Normalised negative log-det (per effective dimension)
+        neg_log_det_norm = neg_log_det / effective_rank
 
         return {
-            "garment_diversity_logdet": log_det,
-            "garment_variance_total":   total_var,
-            "garment_embed_dim":        float(k),   # effective dims used
+            "garment_diversity_neg_logdet":      neg_log_det,
+            "garment_diversity_neg_logdet_normalized":  neg_log_det_norm,
+            "garment_variance_total":        total_var,
+            "garment_embed_dim":             float(effective_rank),
+            "garment_effective_rank":         float(effective_rank),
         }
 
     def reset(self):

@@ -217,23 +217,41 @@ class _CameraAngleBackend:
 
         try:
             output = self._hmr_model({"img": imgs_resized})
-            # Global orientation is axis-angle (B, 3)
+
+            # ── Extract global orientation ─────────────────────────────────
+            # HMR2 returns pred_smpl_params["global_orient"] which can be:
+            #   - (B, 1, 3, 3) rotation matrix (most common)
+            #   - (B, 3, 3) rotation matrix
+            #   - (B, 3) axis-angle
             global_orient = None
+            rot_matrix = None  # Will be set if we get a rotation matrix
+
             if isinstance(output, dict):
-                global_orient = output.get("global_orient", output.get("body_pose", None))
-                if global_orient is None and isinstance(output.get("pred_smpl_params"), dict):
+                go = output.get("global_orient", None)
+                if go is None and isinstance(output.get("pred_smpl_params"), dict):
                     pred_smpl = output["pred_smpl_params"]
-                    global_orient = pred_smpl.get("global_orient", pred_smpl.get("body_pose", None))
+                    go = pred_smpl.get("global_orient", None)
 
-            if global_orient is not None:
-                if global_orient.ndim == 3:
-                    global_orient = global_orient[:, 0, :3]
-                elif global_orient.ndim == 2 and global_orient.shape[1] >= 3:
-                    global_orient = global_orient[:, :3]
-                else:
-                    global_orient = None
+                if go is not None:
+                    if go.ndim == 4 and go.shape[-2:] == (3, 3):
+                        # (B, 1, 3, 3) or (B, K, 3, 3) rotation matrix
+                        rot_matrix = go[:, 0]  # -> (B, 3, 3)
+                    elif go.ndim == 3 and go.shape[-2:] == (3, 3):
+                        # (B, 3, 3) rotation matrix
+                        rot_matrix = go
+                    elif go.ndim == 3 and go.shape[-1] == 3:
+                        # (B, 1, 3) axis-angle -> squeeze
+                        global_orient = go[:, 0, :3]
+                    elif go.ndim == 2 and go.shape[1] >= 3:
+                        # (B, 3) axis-angle
+                        global_orient = go[:, :3]
 
-            if global_orient is not None:
+            # ── Convert to azimuth / elevation ─────────────────────────────
+            if rot_matrix is not None:
+                # Extract Euler angles directly from rotation matrix
+                azimuth, elevation = self._rotmat_to_euler(rot_matrix)
+                confidence = torch.ones(B, device=self.device)
+            elif global_orient is not None:
                 # Convert axis-angle to euler angles
                 azimuth, elevation = self._axis_angle_to_euler(global_orient)
                 confidence = torch.ones(B, device=self.device)
@@ -241,7 +259,6 @@ class _CameraAngleBackend:
                 # Fallback to camera parameters
                 pred_cam = output.get("pred_cam", None) if isinstance(output, dict) else None
                 if pred_cam is not None:
-                    # pred_cam is (s, tx, ty) - limited angle info
                     azimuth = torch.zeros(B, device=self.device)
                     elevation = torch.zeros(B, device=self.device)
                     confidence = torch.ones(B, device=self.device) * 0.5
@@ -300,6 +317,25 @@ class _CameraAngleBackend:
         elevation = torch.asin(-R[:, 1, 2].clamp(-1, 1)) * 180 / math.pi
 
         # Keep 1-D tensors even when batch size is 1.
+        return azimuth.reshape(-1), elevation.reshape(-1)
+
+    # --------------------------------------------------------------------- #
+    def _rotmat_to_euler(self, R: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Extract azimuth (yaw) and elevation (pitch) from rotation matrix.
+
+        Args:
+            R: (B, 3, 3) rotation matrix
+
+        Returns:
+            azimuth: (B,) in degrees [-180, 180]
+            elevation: (B,) in degrees [-90, 90]
+        """
+        # Extract Euler angles (Y-X-Z convention)
+        # Azimuth (yaw) = rotation around Y axis
+        # Elevation (pitch) = rotation around X axis
+        azimuth = torch.atan2(R[:, 0, 2], R[:, 2, 2]) * 180 / math.pi
+        elevation = torch.asin(-R[:, 1, 2].clamp(-1, 1)) * 180 / math.pi
         return azimuth.reshape(-1), elevation.reshape(-1)
 
     # --------------------------------------------------------------------- #
