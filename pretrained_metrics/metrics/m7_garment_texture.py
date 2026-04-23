@@ -57,7 +57,19 @@ class _GarmentEncoder:
 
     # --------------------------------------------------------------------- #
     def _load(self):
-        # Try open_clip_torch — different package name, numpy-ABI-safe
+        # 1. Try FashionCLIP (elite semantic fashion mappings)
+        try:
+            from transformers import CLIPModel, CLIPProcessor
+            self._hf_model = CLIPModel.from_pretrained("patrickjohncyh/fashion-clip").to(self.device).eval()
+            self._hf_processor = CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
+            self._backend = "fashion_clip"
+            self.embed_dim = 512
+            print("[GarmentMetric] Using FashionCLIP (patrickjohncyh/fashion-clip) for absolute domain accuracy.")
+            return
+        except Exception as e:
+            print(f"[GarmentMetric] FashionCLIP unavailable ({e}). Falling back to OpenCLIP.")
+
+        # 2. Try open_clip_torch as fallback
         try:
             import open_clip
             self._oc_model, _, self._oc_preprocess = open_clip.create_model_and_transforms(
@@ -96,6 +108,9 @@ class _GarmentEncoder:
         """cloth_imgs : (B, 3, H, W)  float32  [0,1] → (B, D) np.ndarray"""
         B = cloth_imgs.shape[0]
 
+        if self._backend == "fashion_clip":
+            return self._fashion_clip_embed(cloth_imgs)
+
         if self._backend == "open_clip":
             return self._open_clip_embed(cloth_imgs)
 
@@ -103,6 +118,14 @@ class _GarmentEncoder:
             return self._vit_embed(cloth_imgs)
 
         raise RuntimeError("[GarmentMetric] No valid garment encoder available.")
+
+    def _fashion_clip_embed(self, imgs: torch.Tensor) -> np.ndarray:
+        from PIL import Image
+        pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in imgs]
+        inputs = self._hf_processor(images=pils, return_tensors="pt").to(self.device)
+        emb = self._hf_model.get_image_features(**inputs)
+        emb = F.normalize(emb.float(), dim=-1)
+        return emb.cpu().numpy()
 
     def _open_clip_embed(self, imgs: torch.Tensor) -> np.ndarray:
         from PIL import Image

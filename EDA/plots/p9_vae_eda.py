@@ -382,13 +382,19 @@ def plot_vae_tsne(
     
     print(f"  [VAE-EDA] t-SNE on {len(E_all)} VAE embeddings …")
     
+    # CRITICAL FIX: The Curse of Dimensionality destroys t-SNE distance metrics in 10,000+ dimensions.
+    # We MUST project down to 50 principal components first so neighborhood distances remain mathematically meaningful.
+    from sklearn.decomposition import PCA
+    pca_preprocessor = PCA(n_components=min(50, len(E_norm), E_norm.shape[1]), random_state=42)
+    E_pca50 = pca_preprocessor.fit_transform(E_norm)
+    
     tsne = TSNE(
         n_components=2,
-        perplexity=min(perplexity, len(E_all) // 4),
+        perplexity=min(perplexity, len(E_pca50) // 4),
         random_state=0,
         n_iter=1000,
     )
-    Z = tsne.fit_transform(E_norm)
+    Z = tsne.fit_transform(E_pca50)
     
     fig, ax = plt.subplots(figsize=(4.5, 3.8))
     

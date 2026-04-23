@@ -93,6 +93,7 @@ def plot_occlusion_histogram(
             color=color, 
             linewidth=1.8,     # Strong border line
             linestyle=linestyle,
+            clip=(0.0, 1.0)
         )
         ax_kde.axvline(
             occ.mean(), color=color, linestyle="--", 
@@ -161,6 +162,7 @@ def plot_occlusion_histogram(
         sns.kdeplot(
             occ, ax=ax_ind, fill=False,
             color=color, linewidth=2.0,
+            clip=(0.0, 1.0)
         )
         ax_ind.axvline(
             occ.mean(), color=color, linestyle="--",
