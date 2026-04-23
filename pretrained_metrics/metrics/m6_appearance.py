@@ -103,28 +103,33 @@ class ParametricFaceMetric:
             crop_success = False
             img_crop = img_full
 
-            # Try to dynamically crop the exact face using RetinaFace
-            if self._face_app is not None:
-                # InsightFace requires BGR for detection
-                bgr_img = cv2.cvtColor(img_full, cv2.COLOR_RGB2BGR)
-                faces = self._face_app.get(bgr_img)
-                if len(faces) > 0:
-                    # Get the largest face
-                    faces = sorted(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]), reverse=True)
-                    bbox = faces[0].bbox.astype(int)
-                    # Add 20% margin to ensure jaw/forehead are captured perfectly for MediaPipe
-                    bw = bbox[2] - bbox[0]
-                    bh = bbox[3] - bbox[1]
-                    margin_x = int(bw * 0.20)
-                    margin_y = int(bh * 0.20)
+            # Try to dynamically crop the exact face using OpenCV Haar Cascades 
+            # (zero external dependency, perfectly isolates faces).
+            if not crop_success:
+                try:
+                    gray = cv2.cvtColor(img_full, cv2.COLOR_RGB2GRAY)
+                    # Load Haar Cascade (bundled with cv2)
+                    cascade_path = os.path.join(cv2.data.haarcascades, 'haarcascade_frontalface_default.xml')
+                    if hasattr(self, '_face_cascade') is False:
+                        self._face_cascade = cv2.CascadeClassifier(cascade_path)
                     
-                    x1 = max(0, bbox[0] - margin_x)
-                    y1 = max(0, bbox[1] - margin_y)
-                    x2 = min(W, bbox[2] + margin_x)
-                    y2 = min(H, bbox[3] + margin_y)
-                    
-                    img_crop = img_full[y1:y2, x1:x2]
-                    crop_success = True
+                    faces = self._face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+                    if len(faces) > 0:
+                        # Grab largest box: (x, y, w, h)
+                        faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+                        x, y, w, h = faces[0]
+                        margin_x = int(w * 0.25)
+                        margin_y = int(h * 0.25)
+                        
+                        x1 = max(0, x - margin_x)
+                        y1 = max(0, y - margin_y)
+                        x2 = min(W, x + w + margin_x)
+                        y2 = min(H, y + h + margin_y)
+                        
+                        img_crop = img_full[y1:y2, x1:x2]
+                        crop_success = True
+                except Exception:
+                    pass
 
             # If RetinaFace failed or is uninstalled, use the manual studio center-top crop
             if not crop_success:
