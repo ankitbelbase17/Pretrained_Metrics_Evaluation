@@ -51,9 +51,13 @@ def generate_radar_chart(json_path: str, out_dir: str):
             plot_datasets.append(("DressCode", d))
         elif "street" in name:
             plot_datasets.append(("StreetTryOn", d))
+        elif "curvton" in name and "easy" in name:
+            plot_datasets.append(("CurvTON-Easy", d))
+        elif "curvton" in name and "medium" in name:
+            plot_datasets.append(("CurvTON-Medium", d))
         elif "curvton" in name and "hard" in name:
             plot_datasets.append(("CurvTON-Hard", d))
-        elif "curvton" in name and "test" in name and not any(x in name for x in ["easy", "medium"]):
+        elif "curvton" in name and not any(x in name for x in ["easy", "medium", "hard"]):
             plot_datasets.append(("CurvTON", d))
             
     # Ensure unique
@@ -112,17 +116,32 @@ def generate_radar_chart(json_path: str, out_dir: str):
         values += [values[0]] # close loop
         
         # Color mapping mapping
-        color_key = name.lower().replace("-", "_")
-        if "curvton" in color_key:
-            color = DATASET_COLORS.get("curvton_hard", "#E7298A")
+        color_key = name.lower()
+        if "curvton-hard" in color_key:
+            color = "#E7298A" # Hot Pink
+            ls = "-"
+            lw = 2.5
+            alpha = 0.25
+        elif "curvton-medium" in color_key:
+            color = "#D95F02" # Deep Orange
+            ls = "-"
+            lw = 2.0
+            alpha = 0.15
+        elif "curvton-easy" in color_key:
+            color = "#1B9E77" # Teal Green
+            ls = "-"
+            lw = 1.5
+            alpha = 0.10
+        elif "curvton" in color_key:
+            color = DATASET_COLORS.get("curvton", "#E7298A")
             ls = "-"
             lw = 2.5
             alpha = 0.25
         else:
-            color = DATASET_COLORS.get(color_key, "#333333")
-            ls = DATASET_LINESTYLES.get(color_key, "--")
+            color = DATASET_COLORS.get(color_key.replace("-", "_"), "#333333")
+            ls = DATASET_LINESTYLES.get(color_key.replace("-", "_"), "--")
             lw = 1.5
-            alpha = 0.1
+            alpha = 0.05
             
         ax.plot(angles, values, color=color, linewidth=lw, linestyle=ls, label=name)
         ax.fill(angles, values, color=color, alpha=alpha)
