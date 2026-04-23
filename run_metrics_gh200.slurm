@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=4            # Request 4 GH200 GPUs
 #SBATCH --cpus-per-task=32           # 32 CPU cores per node to feed GPUs
-#SBATCH --mem=64G                   # Allocate 64 GB RAM
+#SBATCH --mem=400G                   # Allocate 64 GB RAM
 #SBATCH --time=07:00:00              # 7 hours walltime
 #SBATCH --partition=gpu              # Replace with your HPC's GH200 partition name
 
