@@ -79,6 +79,7 @@ class _KeypointExtractor:
 
     def __init__(self, device: str = "cpu"):
         self.device = device
+        self._backend = "keypointrcnn"
         self._krcnn = None
         self._load()
 
@@ -92,6 +93,7 @@ class _KeypointExtractor:
                 weights=weights
             )
             self._krcnn = self._krcnn.to(self.device).eval()
+            self._backend = "keypointrcnn"
             print("[PoseMetric] Using KeypointRCNN for keypoint extraction.")
         except Exception as e2:
             raise RuntimeError(

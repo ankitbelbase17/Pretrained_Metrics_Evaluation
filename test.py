@@ -71,6 +71,7 @@ class MetricAudit:
     selected_by_chain: Dict[str, Optional[str]]
     notes: List[str]
     error: Optional[str] = None
+    computed_values: Optional[Dict[str, object]] = None
 
 
 @dataclass
@@ -83,6 +84,32 @@ class EDASummary:
     fallback_used: bool
     notes: List[str]
     error: Optional[str] = None
+
+
+def _fmt_value(v: object) -> str:
+    if isinstance(v, float):
+        if np.isnan(v):
+            return "NA"
+        return f"{v:.6g}"
+    if isinstance(v, (np.floating,)):
+        fv = float(v)
+        if np.isnan(fv):
+            return "NA"
+        return f"{fv:.6g}"
+    if isinstance(v, (np.integer,)):
+        return str(int(v))
+    if v is None:
+        return "NA"
+    return str(v)
+
+
+def _compact_values(values: Optional[Dict[str, object]]) -> str:
+    if not values:
+        return "NA"
+    parts: List[str] = []
+    for k in sorted(values.keys()):
+        parts.append(f"{k}={_fmt_value(values[k])}")
+    return ", ".join(parts)
 
 
 def _chain_statuses(
@@ -142,7 +169,7 @@ def _run_updates(metric_obj, batches: List[Dict[str, torch.Tensor]], use_cloth: 
 
 
 def _probe_m1(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudit:
-    chains = {"pose_extractor": [ChainModel("MMPose HRNet-W32", "mmpose_hrnet")]}
+    chains = {"pose_extractor": [ChainModel("KeypointRCNN", "keypointrcnn")]}
     try:
         from pretrained_metrics.metrics.m1_pose import PoseMetrics
 
@@ -154,10 +181,11 @@ def _probe_m1(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             metric="M1 Pose",
             status="LOADED",
             selected_backend=backend,
-            fallback_used=(backend != "mmpose_hrnet"),
+            fallback_used=(backend != "keypointrcnn"),
             chains=chains,
             selected_by_chain={"pose_extractor": backend},
             notes=[f"compute_keys={sorted(result.keys())}", f"backend={backend}"],
+            computed_values=result,
         )
     except Exception as e:
         return MetricAudit(
@@ -170,6 +198,7 @@ def _probe_m1(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             selected_by_chain={"pose_extractor": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 
@@ -210,6 +239,7 @@ def _probe_m2(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
                 "object_detector": det_backend if det_required else "N/A",
             },
             notes=notes,
+            computed_values=result,
         )
     except Exception as e:
         return MetricAudit(
@@ -222,6 +252,7 @@ def _probe_m2(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             selected_by_chain={"segmentation": None, "object_detector": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 
@@ -249,6 +280,7 @@ def _probe_m3(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
                 "object_detector": det_backend,
             },
             notes=[f"compute_keys={sorted(result.keys())}"],
+            computed_values=result,
         )
     except Exception as e:
         return MetricAudit(
@@ -261,6 +293,7 @@ def _probe_m3(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             selected_by_chain={"person_segmenter": None, "object_detector": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 
@@ -280,6 +313,7 @@ def _probe_m4(_: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudit:
             chains=chains,
             selected_by_chain={"signal_processing": "signal_processing"},
             notes=[f"compute_keys={sorted(result.keys())}"],
+            computed_values=result,
         )
     except Exception as e:
         return MetricAudit(
@@ -292,6 +326,7 @@ def _probe_m4(_: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudit:
             selected_by_chain={"signal_processing": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 def _probe_m5(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudit:
@@ -311,6 +346,7 @@ def _probe_m5(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             chains=chains,
             selected_by_chain={"shape_extractor": backend},
             notes=[f"compute_keys={sorted(result.keys())}", f"backend={backend}"],
+            computed_values=result,
         )
     except Exception as e:
         return MetricAudit(
@@ -323,6 +359,7 @@ def _probe_m5(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             selected_by_chain={"shape_extractor": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 
@@ -343,6 +380,7 @@ def _probe_m6(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             chains=chains,
             selected_by_chain={"face_embedder": backend},
             notes=[f"compute_keys={sorted(result.keys())}", f"backend={backend}"],
+            computed_values=result,
         )
     except Exception as e:
         return MetricAudit(
@@ -355,6 +393,7 @@ def _probe_m6(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             selected_by_chain={"face_embedder": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 
@@ -376,6 +415,7 @@ def _probe_m7(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             chains=chains,
             selected_by_chain={"garment_encoder": backend},
             notes=[f"compute_keys={sorted(result.keys())}", f"backend={backend}"],
+            computed_values=result,
         )
     except Exception as e:
         return MetricAudit(
@@ -388,6 +428,7 @@ def _probe_m7(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             selected_by_chain={"garment_encoder": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 
@@ -416,6 +457,7 @@ def _probe_m8(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             chains=chains,
             selected_by_chain={"vae_encoder": backend},
             notes=[f"compute_keys={sorted(result.keys())}", f"backend={backend}"],
+            computed_values=result,
         )
     except Exception as e:
         return MetricAudit(
@@ -428,6 +470,7 @@ def _probe_m8(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
             selected_by_chain={"vae_encoder": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 
@@ -492,6 +535,7 @@ def _probe_vlm(device: str) -> MetricAudit:
             chains=chains,
             selected_by_chain={"vlm_backend": backend},
             notes=["load-only check (not part of M1-M9 dataloader compute)"],
+            computed_values=None,
         )
     except Exception as e:
         return MetricAudit(
@@ -504,6 +548,7 @@ def _probe_vlm(device: str) -> MetricAudit:
             selected_by_chain={"vlm_backend": None},
             notes=[],
             error=f"{type(e).__name__}: {e}",
+            computed_values=None,
         )
 
 
@@ -774,6 +819,12 @@ def _print_metric_audit(a: MetricAudit):
         print(f"      fallback_used    : {a.fallback_used}")
     for n in a.notes:
         print(f"      note             : {n}")
+    if a.status == "LOADED" and a.computed_values:
+        print("      computed_values  :")
+        for k in sorted(a.computed_values.keys()):
+            print(f"        - {k} = {_fmt_value(a.computed_values[k])}")
+    else:
+        print("      computed_values  : NA")
     for chain_name, chain in a.chains.items():
         selected_token = a.selected_by_chain.get(chain_name)
         if selected_token == "N/A":
@@ -808,6 +859,7 @@ def _print_eda_summary(e: EDASummary):
     print(f"      required_metrics : {', '.join(e.required_metrics)}")
     print(f"      selected_mode    : {e.selected_mode}")
     print(f"      fallback_used    : {e.fallback_used}")
+    print(f"      plot_value       : {'GENERATED' if e.status == 'READY' else 'NA'}")
     for n in e.notes:
         print(f"      note             : {n}")
     if e.error:
@@ -815,6 +867,31 @@ def _print_eda_summary(e: EDASummary):
 
 def _fmt_cell(v: object) -> str:
     return str(v) if v is not None else "-"
+
+
+def _models_used_from_audit(a: MetricAudit) -> str:
+    if a.status != "LOADED":
+        return "NA"
+    models: List[str] = []
+    for chain_name, selected_token in a.selected_by_chain.items():
+        if selected_token in (None, "N/A"):
+            continue
+        chain = a.chains.get(chain_name, [])
+        label = next((c.label for c in chain if c.token == selected_token), selected_token)
+        models.append(f"{chain_name}:{label}")
+    return "; ".join(models) if models else "NA"
+
+
+def _remarks_for_metric(a: MetricAudit) -> str:
+    if a.status == "LOADED":
+        return "Success"
+    return a.error or "Failed"
+
+
+def _remarks_for_eda(e: EDASummary) -> str:
+    if e.status == "READY":
+        return "Success"
+    return e.error or "Failed"
 
 
 def _print_table(title: str, headers: List[str], rows: List[List[object]]):
@@ -933,12 +1010,29 @@ def run_checks(args) -> int:
             a.status,
             a.selected_backend or "-",
             a.fallback_used if a.fallback_used is not None else "-",
+            _compact_values(a.computed_values) if a.status == "LOADED" else "NA",
         ])
     if metric_rows:
         _print_table(
             "  Summarized Table: Metrics",
-            ["Key", "Metric", "Status", "Loaded Backend", "Fallback"],
+            ["Key", "Metric", "Status", "Loaded Backend", "Fallback", "Values"],
             metric_rows,
+        )
+        print()
+
+    metric_value_rows: List[List[object]] = []
+    for k in sorted(metric_results.keys()):
+        a = metric_results[k]
+        if a.status == "LOADED" and a.computed_values:
+            for mk in sorted(a.computed_values.keys()):
+                metric_value_rows.append([a.key.upper(), mk, _fmt_value(a.computed_values[mk]), "OK"])
+        else:
+            metric_value_rows.append([a.key.upper(), "ALL", "NA", a.error or "Not loaded"])
+    if metric_value_rows:
+        _print_table(
+            "  Detailed Metric Values (NA where errors occurred)",
+            ["Metric", "Value Key", "Value", "Note"],
+            metric_value_rows,
         )
         print()
 
@@ -952,12 +1046,54 @@ def run_checks(args) -> int:
             row.status,
             row.selected_mode,
             row.fallback_used,
+            "GENERATED" if row.status == "READY" else "NA",
         ])
     if eda_rows_table:
         _print_table(
             "  Summarized Table: EDA",
-            ["Key", "Plot", "Status", "Selected Mode", "Fallback"],
+            ["Key", "Plot", "Status", "Selected Mode", "Fallback", "Value"],
             eda_rows_table,
+        )
+        print()
+
+    final_metric_rows: List[List[object]] = []
+    for k in sorted(metric_results.keys()):
+        a = metric_results[k]
+        final_metric_rows.append([
+            a.key.upper(),
+            a.metric,
+            "YES" if a.status == "LOADED" else "NO",
+            _compact_values(a.computed_values) if a.status == "LOADED" else "NA",
+            _models_used_from_audit(a),
+            _remarks_for_metric(a),
+        ])
+
+    if final_metric_rows:
+        _print_table(
+            "  Final Audit Table: Metrics",
+            ["Key", "Metric", "Computed", "Metric Values", "Pretrained Model Used", "Remarks"],
+            final_metric_rows,
+        )
+        print()
+
+    final_plot_rows: List[List[object]] = []
+    for e in eda_rows:
+        if any(s.lower() in e.key.lower() for s in args.skip):
+            continue
+        final_plot_rows.append([
+            e.key.upper(),
+            e.plot,
+            "YES" if e.status == "READY" else "NO",
+            "GENERATED" if e.status == "READY" else "NA",
+            ", ".join(e.required_metrics),
+            _remarks_for_eda(e),
+        ])
+
+    if final_plot_rows:
+        _print_table(
+            "  Final Audit Table: EDA Plots",
+            ["Key", "Plot", "Computed", "Value", "Driven By", "Remarks"],
+            final_plot_rows,
         )
         print()
 
