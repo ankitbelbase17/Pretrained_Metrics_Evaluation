@@ -155,6 +155,34 @@ class IlluminationMetrics:
             self._mean_L.append(mean_L_i)
             self._grad_var.append(float(grad_metric))
 
+    # ------------------------------------------------------------------ #
+    def compute(self) -> Dict[str, float]:
+        if not self._mean_L:
+            return {k: float("nan") for k in [
+                "luminance_mean_global", "luminance_var_global",
+                "illumination_gradient_mean", "illumination_complexity",
+            ]}
+        arr_L = np.array(self._mean_L)
+        arr_gv = np.array(self._grad_var)
+
+        lum_mean = float(arr_L.mean())
+        if self.use_mad:
+            lum_var = float(_mad(arr_L))
+        else:
+            lum_var = float(arr_L.var())
+        grad_mean = float(arr_gv.mean())
+
+        return {
+            "luminance_mean_global": lum_mean,
+            "luminance_var_global": lum_var,
+            "illumination_gradient_mean": grad_mean,
+            "illumination_complexity": lum_var + grad_mean,
+        }
+
+    def reset(self):
+        self._mean_L.clear()
+        self._grad_var.clear()
+
 
 def _compute_masked_grad_var(L_map: np.ndarray, mask: np.ndarray, blur_sigma: float = 1.0, eps: float = 1e-8) -> float:
     # compute gradient mag and return variance over masked pixels
@@ -191,30 +219,17 @@ def _compute_masked_grad_mean(L_map: np.ndarray, mask: np.ndarray, blur_sigma: f
         return float(mag.mean() + eps)
     return float(mag[m].mean() + eps)
 
-    # ------------------------------------------------------------------ #
-    def compute(self) -> Dict[str, float]:
-        if not self._mean_L:
-            return {k: float("nan") for k in [
-                "luminance_mean_global", "luminance_var_global",
-                "illumination_gradient_mean", "illumination_complexity",
-            ]}
-        arr_L = np.array(self._mean_L)
-        arr_gv = np.array(self._grad_var)
 
-        lum_mean = float(arr_L.mean())
-        if self.use_mad:
-            lum_var = float(_mad(arr_L))
-        else:
-            lum_var = float(arr_L.var())
-        grad_mean = float(arr_gv.mean())
+# ─────────────────────────────────────────────────────────────────────────────
+# Backward-compatible aliases used by test.py and EDA code
+# ─────────────────────────────────────────────────────────────────────────────
 
-        return {
-            "luminance_mean_global": lum_mean,
-            "luminance_var_global": lum_var,
-            "illumination_gradient_mean": grad_mean,
-            "illumination_complexity": lum_var + grad_mean,
-        }
+def _rgb_to_lab_l(imgs: torch.Tensor):
+    """Alias for _rgb_to_luminance (legacy name used by EDA code)."""
+    return _rgb_to_luminance(imgs)
 
-    def reset(self):
-        self._mean_L.clear()
-        self._grad_var.clear()
+
+def _sobel_gradient_variance(L_map: np.ndarray) -> float:
+    """Alias: returns the variance component from _sobel_gradient_stats."""
+    var, _ = _sobel_gradient_stats(L_map)
+    return var

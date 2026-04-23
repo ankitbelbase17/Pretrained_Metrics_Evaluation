@@ -384,6 +384,13 @@ class _SegBackend:
             Legacy keys (for backward compatibility):
             "arms", "hair", "other"
         """
+        # Robust BHWC → BCHW conversion
+        if imgs.ndim != 4:
+            raise RuntimeError(f"[OcclusionMetric] Expected 4D tensor, got shape={tuple(imgs.shape)}")
+        if imgs.shape[1] != 3 and imgs.shape[-1] == 3:
+            imgs = imgs.permute(0, 3, 1, 2).contiguous()
+        if imgs.shape[1] != 3:
+            raise RuntimeError(f"[OcclusionMetric] Expected C=3, got shape={tuple(imgs.shape)}")
         B, C, H, W = imgs.shape
 
         if self._backend == "stub":
@@ -487,7 +494,6 @@ class _SegBackend:
         inputs = self._processor(
             images=pils,
             return_tensors="pt",
-            input_data_format="channels_last",
         ).to(self.device)
         logits = self._model(**inputs).logits
         logits_up = F.interpolate(logits, size=(H, W), mode="bilinear", align_corners=False)
@@ -534,7 +540,6 @@ class _SegBackend:
         inputs = self._processor(
             images=pils,
             return_tensors="pt",
-            input_data_format="channels_last",
         ).to(self.device)
         logits = self._model(**inputs).logits        # (B, C, h', w')
 

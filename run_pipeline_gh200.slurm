@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=400G
+#SBATCH --mem=64G
 #SBATCH --time=02:00:00
 #SBATCH --output=/users/dbartaula/logs/pipeline_unified_%j.log
 #SBATCH --error=/users/dbartaula/logs/pipeline_unified_%j_error.log

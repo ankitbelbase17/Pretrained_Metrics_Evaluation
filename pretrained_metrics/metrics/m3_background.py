@@ -180,8 +180,8 @@ class _ObjectDetector:
 
             # Batch person-masking on CPU
             imgs_masked = imgs.clone()
-            for i in range(B):
-                imgs_masked[i, :, person_masks[i]] = 0.0
+            bg_mask = (~person_masks).unsqueeze(1).float()  # (B, 1, H, W)
+            imgs_masked = imgs_masked * bg_mask  # zero out person pixels
 
             # PIL conversion (all at once)
             pils = []
@@ -195,7 +195,6 @@ class _ObjectDetector:
             inputs = self._feature(
                 images=pils,
                 return_tensors="pt",
-                input_data_format="channels_last",
             ).to(self.device)
             outs = self._model(**inputs)
 
@@ -223,8 +222,8 @@ class _ObjectDetector:
 
         B = imgs.shape[0]
         imgs_masked = imgs.clone()
-        for i in range(B):
-            imgs_masked[i, :, person_masks[i]] = 0.0
+        bg_mask = (~person_masks).unsqueeze(1).float()  # (B, 1, H, W)
+        imgs_masked = imgs_masked * bg_mask  # zero out person pixels
 
         pils = []
         for i in range(B):
@@ -236,7 +235,6 @@ class _ObjectDetector:
         inputs = self._feature(
             images=pils,
             return_tensors="pt",
-            input_data_format="channels_last",
         ).to(self.device)
         outs = self._model(**inputs)
 
