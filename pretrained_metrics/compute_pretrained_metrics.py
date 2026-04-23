@@ -74,7 +74,12 @@ from pretrained_metrics.metrics.m6_appearance     import AppearanceMetrics
 from pretrained_metrics.metrics.m7_garment_texture import GarmentTextureMetrics
 from pretrained_metrics.metrics.m8_vae_latent     import VAELatentMetric
 from pretrained_metrics.metrics.m9_camera_angle   import CameraAngleMetrics
-from pretrained_metrics.metrics.unified_index     import UnifiedComplexityIndex
+from pretrained_metrics.metrics.unified_index     import (
+    UnifiedComplexityIndex,
+    METRIC_KEYS,
+    VITON_HD_BASELINES,
+    VITON_HD_STDS,
+)
 
 # Configuration management
 try:
@@ -89,6 +94,48 @@ except ImportError:
 
 def _all_nan():
     return float("nan")
+
+
+def _sigmoid_local(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _category_scores_from_result(result: Dict[str, object]) -> Dict[str, Dict[str, float]]:
+    """
+    Build per-category raw/z/normalized scores for the unified metric families.
+    Normalization is z-score vs VITON-HD baseline, then sigmoid(z) -> [0,1].
+    """
+    raw_scores: Dict[str, float] = {}
+    z_scores: Dict[str, float] = {}
+    norm_scores: Dict[str, float] = {}
+
+    for mk, _ in METRIC_KEYS:
+        v = result.get(mk, float("nan"))
+        try:
+            raw = float(v)
+        except Exception:
+            raw = float("nan")
+        raw_scores[mk] = raw
+
+        mu = float(VITON_HD_BASELINES.get(mk, 0.0))
+        sig = float(max(VITON_HD_STDS.get(mk, 1.0), 1e-6))
+        if isinstance(raw, float) and not math.isnan(raw):
+            z = (raw - mu) / sig
+            z_scores[mk] = z
+            norm_scores[mk] = _sigmoid_local(z)
+        else:
+            z_scores[mk] = float("nan")
+            norm_scores[mk] = float("nan")
+
+    valid = [v for v in norm_scores.values() if not (isinstance(v, float) and math.isnan(v))]
+    overall = float(sum(valid) / len(valid)) if valid else float("nan")
+
+    return {
+        "raw": raw_scores,
+        "z": z_scores,
+        "normalized_0_1": norm_scores,
+        "overall_mean_0_1": overall,
+    }
 
 
 def evaluate_one_dataset(
@@ -229,6 +276,11 @@ def evaluate_one_dataset(
         "elapsed_s": round(elapsed, 2),
         **r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r9,
     }
+    cat_scores = _category_scores_from_result(result)
+    result["category_metrics_raw"] = cat_scores["raw"]
+    result["category_metrics_zscore"] = cat_scores["z"]
+    result["category_metrics_normalized_0_1"] = cat_scores["normalized_0_1"]
+    result["category_complexity_mean_0_1"] = cat_scores["overall_mean_0_1"]
 
     _print_result_box(result)
     print("  Metrics JSON:")
@@ -297,6 +349,12 @@ def _print_result_box(r: dict):
     for key, label in DISPLAY_KEYS:
         if key in r:
             print(f"  │  {label:<38} {_fmt(r[key]):>20}  │")
+            norm = r.get("category_metrics_normalized_0_1", {}).get(key, float("nan"))
+            if not (isinstance(norm, float) and math.isnan(norm)):
+                print(f"  │    {'normalized_0_1':<36} {_fmt(norm):>20}  │")
+    if "category_complexity_mean_0_1" in r:
+        print(f"  ├{'─'*W}┤")
+        print(f"  │  {'Category Complexity Mean (0-1)':<38} {_fmt(r['category_complexity_mean_0_1']):>20}  │")
     print(f"  └{'─'*W}┘")
 
 

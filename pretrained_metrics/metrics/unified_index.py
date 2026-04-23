@@ -238,13 +238,18 @@ class UnifiedComplexityIndex:
         # ── Pass 2: sigmoid scores + final combination ───────────────────
         out = []
         for rec, z_dict in zip(self._records, all_z):
+            pre_norm = rec.get("category_metrics_normalized_0_1", {})
             sig_scores = {}
             for mk, _ in METRIC_KEYS:
-                z = z_dict[mk]
-                if _isnan(z):
-                    sig_scores[mk] = float("nan")
+                if isinstance(pre_norm, dict) and mk in pre_norm and not _isnan(pre_norm[mk]):
+                    # Reuse precomputed per-category normalized score when provided.
+                    sig_scores[mk] = float(pre_norm[mk])
                 else:
-                    sig_scores[mk] = _sigmoid(z / tau[mk])
+                    z = z_dict[mk]
+                    if _isnan(z):
+                        sig_scores[mk] = float("nan")
+                    else:
+                        sig_scores[mk] = _sigmoid(z / tau[mk])
 
             # Weighted average of sigmoid scores (only valid ones)
             valid_pairs = [

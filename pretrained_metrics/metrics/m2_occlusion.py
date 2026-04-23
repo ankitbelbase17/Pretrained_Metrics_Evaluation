@@ -400,7 +400,10 @@ class _SegBackend:
 
         # Batched post-processing (returns list[dict], one per image)
         results = self._mask2former_processor.post_process_panoptic_segmentation(
-            outputs, target_sizes=[(H, W)] * B
+            outputs,
+            target_sizes=[(H, W)] * B,
+            # Explicitly set empty fusion list to avoid repeated warning spam.
+            label_ids_to_fuse=[],
         )
 
         # Classify segments per image (cheap CPU work)
