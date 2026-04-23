@@ -369,6 +369,136 @@ def _merge_npz_caches(cache_files: list[Path], out_file: Path, label: str) -> bo
 # Phase runners
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _count_files_with_ext(root: Path, exts: set[str]) -> int:
+    if not root.exists():
+        return 0
+    total = 0
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in exts:
+            total += 1
+    return total
+
+
+def _run_post_pipeline_checks(args, phases: set[int], output_root: Path) -> list[dict]:
+    """
+    Run non-halting post checks:
+      1) test.py metrics audit (continue through failures)
+      2) artifact checks for metrics/EDA/comparison/radar outputs
+    """
+    checks: list[dict] = []
+    plot_exts = {".png", ".jpg", ".jpeg", ".pdf", ".svg", ".webp"}
+
+    print("\n" + "=" * 70)
+    print("  POST-RUN VALIDATION SUITE")
+    print("=" * 70)
+
+    # 1) Metrics sweep using test.py (always continue on dataset errors).
+    device = "cuda" if args.gpus > 0 else "cpu"
+    test_cmd = [
+        sys.executable,
+        "test.py",
+        "--config",
+        args.metrics_config,
+        "--continue_on_error",
+        "--device",
+        device,
+        "--batch_size",
+        str(args.batch_size),
+        "--num_workers",
+        str(args.num_workers),
+    ]
+    print(f"  → {' '.join(test_cmd)}")
+    proc = subprocess.run(
+        test_cmd,
+        cwd=str(Path(__file__).parent),
+        capture_output=True,
+        text=True,
+    )
+    if proc.stdout.strip():
+        print(proc.stdout.strip())
+    if proc.stderr.strip():
+        print("\n  [test.py stderr]")
+        print(proc.stderr.strip())
+
+    checks.append(
+        {
+            "name": "Metrics suite (test.py)",
+            "status": "PASS" if proc.returncode == 0 else "FAIL",
+            "detail": f"exit_code={proc.returncode}",
+        }
+    )
+
+    def _artifact_check(name: str, phase_id: int, path: Path, kind: str) -> None:
+        if phase_id not in phases:
+            checks.append({"name": name, "status": "SKIP", "detail": "phase not selected"})
+            return
+        if kind == "json":
+            count = len(list(path.glob("pretrained_metrics_comprehensive_*.json"))) if path.exists() else 0
+        elif kind == "npz":
+            count = _count_files_with_ext(path, {".npz"})
+        else:
+            count = _count_files_with_ext(path, plot_exts)
+        checks.append(
+            {
+                "name": name,
+                "status": "PASS" if count > 0 else "FAIL",
+                "detail": f"found={count} in {path}",
+            }
+        )
+
+    # 2) Artifact validations for metrics + EDA + plots.
+    _artifact_check(
+        name="Phase 1 output (metrics JSON)",
+        phase_id=1,
+        path=output_root / "metrics" / "pretrained",
+        kind="json",
+    )
+    _artifact_check(
+        name="Phase 2 output (CurvTON plots)",
+        phase_id=2,
+        path=output_root / "plots" / "curvton",
+        kind="plot",
+    )
+    _artifact_check(
+        name="Phase 2 output (CurvTON cache)",
+        phase_id=2,
+        path=output_root / "eda_cache" / "curvton",
+        kind="npz",
+    )
+    _artifact_check(
+        name="Phase 3 output (Baseline plots)",
+        phase_id=3,
+        path=output_root / "plots" / "baselines",
+        kind="plot",
+    )
+    _artifact_check(
+        name="Phase 3 output (Baseline cache)",
+        phase_id=3,
+        path=output_root / "eda_cache",
+        kind="npz",
+    )
+    _artifact_check(
+        name="Phase 4 output (Comparison plots)",
+        phase_id=4,
+        path=output_root / "plots" / "comparison",
+        kind="plot",
+    )
+    _artifact_check(
+        name="Phase 5 output (Radar plots)",
+        phase_id=5,
+        path=output_root / "plots" / "radar",
+        kind="plot",
+    )
+
+    print("\n  Validation summary:")
+    for check in checks:
+        status = check["status"]
+        mark = "✓" if status == "PASS" else ("-" if status == "SKIP" else "✗")
+        print(f"    [{mark}] {check['name']} | {status} | {check['detail']}")
+
+    return checks
+
+
 def phase1_pretrained_metrics(args):
     """Phase 1: Compute pretrained metrics for all datasets via YAML config."""
     _banner(1, 4, "Pretrained Metrics — All Datasets (YAML config)")
@@ -384,7 +514,14 @@ def phase1_pretrained_metrics(args):
         "--batch_size", str(args.batch_size),
         "--num_workers", str(args.num_workers),
         "--force_appear",
+        "--m6_face_detector_backend", args.m6_face_detector_backend,
+        "--m6_retinaface_backbone", args.m6_retinaface_backbone,
+        "--m6_retinaface_device", args.m6_retinaface_device,
     ]
+    if args.m6_retinaface_repo_dir:
+        cli_args += ["--m6_retinaface_repo_dir", args.m6_retinaface_repo_dir]
+    if args.m6_retinaface_weights:
+        cli_args += ["--m6_retinaface_weights", args.m6_retinaface_weights]
     ok = _run_python(script, cli_args, "Pretrained Metrics (all datasets)", gpus=1)
     if not ok:
         return False
@@ -679,6 +816,37 @@ def parse_args():
                    help="Number of GPUs to use for DataParallel processing (torchrun)")
     p.add_argument("--sample_ratio", type=float, default=SAMPLE_RATIO,
                    help="CurvTON EDA sample ratio (default: 0.25)")
+    p.add_argument(
+        "--m6_face_detector_backend",
+        type=str,
+        default="retinaface_pytorch",
+        choices=["auto", "retinaface_pytorch", "insightface", "haar"],
+        help="M6 face detector backend used by pretrained metrics.",
+    )
+    p.add_argument(
+        "--m6_retinaface_repo_dir",
+        type=str,
+        default=None,
+        help="Optional path to cloned yakhyo/retinaface-pytorch repo for M6.",
+    )
+    p.add_argument(
+        "--m6_retinaface_weights",
+        type=str,
+        default=None,
+        help="Optional path to RetinaFace .pth weights for M6.",
+    )
+    p.add_argument(
+        "--m6_retinaface_backbone",
+        type=str,
+        default="mobilenetv1_0.25",
+        help="RetinaFace backbone for M6.",
+    )
+    p.add_argument(
+        "--m6_retinaface_device",
+        type=str,
+        default="cpu",
+        help="Device for RetinaFace detector in M6 (cpu or cuda).",
+    )
 
     # ── Phase selection ───────────────────────────────────────────────────
     p.add_argument("--skip_metrics",    action="store_true",
@@ -731,6 +899,11 @@ def main():
     print(f"  Batch size       : {args.batch_size}")
     print(f"  GPUs (Parallel)  : {args.gpus}")
     print(f"  Sample ratio     : {args.sample_ratio}")
+    print(f"  M6 backend       : {args.m6_face_detector_backend}")
+    print(f"  M6 RetinaFace bb : {args.m6_retinaface_backbone}")
+    print(f"  M6 RetinaFace dev: {args.m6_retinaface_device}")
+    print(f"  M6 RetinaFace dir: {args.m6_retinaface_repo_dir or 'auto'}")
+    print(f"  M6 RetinaFace wt : {args.m6_retinaface_weights or 'auto'}")
     print(f"  Download base    : {args.download_base}")
     print(f"  HF cache         : {cache_info['hf_hub']}")
     print(f"  4DHumans cache   : {cache_info['fourdhumans_cache']}")
@@ -794,8 +967,8 @@ def main():
     else:
         print("\n  [SKIP] Phase 5: Radar Chart")
 
-    # SUCCESS is reported only for non-fallback runs; fallback cases are BYPASS.
-    _print_no_fallback_execution_report(args)
+    # Post checks: run test.py in continue mode + validate EDA/plot artifacts.
+    post_checks = _run_post_pipeline_checks(args, phases, output_root)
 
     # ── Summary ───────────────────────────────────────────────────────────
     elapsed = time.time() - t_start
@@ -813,11 +986,22 @@ def main():
     print(f"    Metrics       : metrics/pretrained/")
     print(f"    Plots         : plots/curvton | plots/baselines | plots/comparison | plots/radar")
     print(f"    EDA cache     : eda_cache/<dataset_or_group>/")
+    print("\n  Post-run checks:")
+    for check in post_checks:
+        status = check["status"]
+        mark = "✓" if status == "PASS" else ("-" if status == "SKIP" else "✗")
+        print(f"    [{mark}] {check['name']} | {status}")
     print("=" * 70)
 
     failed = [phase_id for phase_id, ok in sorted(results.items()) if not ok]
-    if failed:
-        print(f"\n  [EXIT 1] Failed phases: {failed}")
+    failed_checks = [c["name"] for c in post_checks if c["status"] == "FAIL"]
+    if failed or failed_checks:
+        if failed:
+            print(f"\n  [EXIT 1] Failed phases: {failed}")
+        if failed_checks:
+            print("  [EXIT 1] Failed post-run checks:")
+            for name in failed_checks:
+                print(f"    - {name}")
         sys.exit(1)
 
 

@@ -69,8 +69,12 @@ def _parse() -> argparse.Namespace:
                    help="Optional dataset name filter, e.g. curvton viton_hd dresscode")
     p.add_argument("--max_datasets", type=int, default=0,
                    help="Run at most N entries from config (0 = all)")
-    p.add_argument("--continue_on_error", action="store_true",
-                   help="Continue all entries even if one entry fails")
+    p.add_argument(
+        "--continue_on_error",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Continue all entries even if one entry fails (default: enabled).",
+    )
     p.add_argument("--device", type=str, default=None,
                    help="Override device from config defaults")
     p.add_argument("--batch_size", type=int, default=None,

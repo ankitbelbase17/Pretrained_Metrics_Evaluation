@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import subprocess
 import sys
 import urllib.request
 import warnings
@@ -24,6 +25,11 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import torch
+
+RETINAFACE_REPO_URL = "https://github.com/yakhyo/retinaface-pytorch.git"
+RETINAFACE_WEIGHTS_URL = (
+    "https://github.com/yakhyo/retinaface-pytorch/releases/download/v0.0.1/retinaface_mv1_0.25.pth"
+)
 
 
 class _RetinaFaceTorchDetector:
@@ -169,6 +175,41 @@ class ParametricFaceMetric:
         self._load()
 
     @staticmethod
+    def _default_retinaface_paths() -> Tuple[Path, Path]:
+        root = Path(os.environ.get("RETINAFACE_PYTORCH_HOME", Path.home() / ".cache" / "retinaface_pytorch"))
+        return root / "retinaface-pytorch", root / "retinaface_mv1_0.25.pth"
+
+    def _ensure_retinaface_artifacts(self):
+        if self._face_detector_backend not in ("auto", "retinaface_pytorch"):
+            return
+
+        repo_path = Path(self._retinaface_repo_dir) if self._retinaface_repo_dir else None
+        weights_path = Path(self._retinaface_weights) if self._retinaface_weights else None
+        default_repo, default_weights = self._default_retinaface_paths()
+
+        if repo_path is None:
+            repo_path = default_repo
+            self._retinaface_repo_dir = str(repo_path)
+        if weights_path is None:
+            weights_path = default_weights
+            self._retinaface_weights = str(weights_path)
+
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+        weights_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not repo_path.exists():
+            print(f"[FaceParametric] Cloning RetinaFace repo to {repo_path} ...")
+            subprocess.run(["git", "clone", RETINAFACE_REPO_URL, str(repo_path)], check=True)
+        else:
+            print(f"[FaceParametric] RetinaFace repo already present at {repo_path}, skipping clone.")
+
+        if not weights_path.exists():
+            print(f"[FaceParametric] Downloading RetinaFace weights to {weights_path} ...")
+            urllib.request.urlretrieve(RETINAFACE_WEIGHTS_URL, str(weights_path))
+        else:
+            print(f"[FaceParametric] RetinaFace weights already present at {weights_path}, skipping download.")
+
+    @staticmethod
     def _square_crop(img: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> Optional[np.ndarray]:
         h, w = img.shape[:2]
         x1 = max(0, min(w - 1, int(x1)))
@@ -189,6 +230,11 @@ class ParametricFaceMetric:
         return sq
 
     def _load(self):
+        try:
+            self._ensure_retinaface_artifacts()
+        except Exception as e:
+            print(f"[FaceParametric] RetinaFace auto-setup skipped: {e}")
+
         try_retina = self._face_detector_backend in ("auto", "retinaface_pytorch")
         if try_retina and self._retinaface_repo_dir and self._retinaface_weights:
             try:
