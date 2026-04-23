@@ -102,6 +102,12 @@ BASELINES = {
     "camera_diversity_score":      (0.5, 0.25)
 }
 
+# Backward-compatible exports expected by compute_pretrained_metrics.py.
+# These constants were historically provided by this module.
+VITON_HD_BASELINES = {k: float(mu) for k, (mu, _sig) in BASELINES.items()}
+VITON_HD_STDS = {k: float(sig) for k, (_mu, sig) in BASELINES.items()}
+METRIC_KEYS = [(k, k.replace("_", " ").title()) for k in BASELINES.keys()]
+
 
 def _sigmoid(x: float) -> float:
     if x >= 0:
