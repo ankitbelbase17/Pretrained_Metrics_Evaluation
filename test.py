@@ -4,7 +4,7 @@ test.py
 Compute smoke-test for pretrained metrics (M1-M9) and EDA plots using CurvTON-hard.
 
 What this script does:
-1. Builds a small dataloader from CurvTON easy split.
+1. Builds a dataloader from CurvTON hard split (full set by default).
 2. Runs real metric computation (update + compute) for M1-M9.
 3. Extracts EDA feature tensors from the same mini-batches.
 4. Runs EDA plotting functions (P1-P10) and reports exact errors.
@@ -167,7 +167,7 @@ def _collect_curvton_easy_batches(args) -> Tuple[List[Dict[str, torch.Tensor]], 
             break
 
     if not batches:
-        raise RuntimeError("No batches were loaded from CurvTON easy dataloader.")
+        raise RuntimeError("No batches were loaded from CurvTON hard dataloader.")
     return batches, len(batches), n_images
 
 
@@ -1156,7 +1156,7 @@ def _parse():
     )
     p.add_argument("--dataset_name", type=str, default="curvton", help="Dataset registry name")
     p.add_argument("--split", type=str, default="test")
-    p.add_argument("--batch_size", type=int, default=4)
+    p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--img_size", type=int, nargs=2, default=[512, 384], metavar=("H", "W"))
     p.add_argument(
@@ -1171,5 +1171,8 @@ def _parse():
 
 if __name__ == "__main__":
     args = _parse()
+    if args.batch_size < 16:
+        print(f"[Config] Requested batch_size={args.batch_size} is below minimum; using 16.")
+        args.batch_size = 16
     n_failed = run_checks(args)
     sys.exit(0 if n_failed == 0 else 1)
