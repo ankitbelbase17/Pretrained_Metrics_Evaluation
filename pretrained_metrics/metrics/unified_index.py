@@ -63,13 +63,13 @@ METRIC_ONTOLOGY = {
     "7_GarmentTexture": {
         "name": "Garment Texture",
         "c_key": "garment_variance_total",     # Pattern complexity
-        "d_key": "garment_diversity_neg_logdet_normalized",
+        "d_key": "garment_diversity_logdet_normalized",
         "w": 1.0
     },
     "8_VAELatent": {
         "name": "VAE Latent",
         "c_key": "vae_complexity_abs",         # Overall signal energy
-        "d_key": "vae_diversity_neg_logdet_normalized",
+        "d_key": "vae_diversity_logdet_normalized",
         "w": 1.0
     },
     "9_CameraAngle": {
@@ -95,9 +95,9 @@ BASELINES = {
     "appearance_diversity_mean":   (0.4, 0.2),
     "appearance_diversity_std":    (0.1, 0.05),
     "garment_variance_total":      (20.0, 10.0),
-    "garment_diversity_neg_logdet_normalized": (5.0, 2.0),
+    "garment_diversity_logdet_normalized": (-5.0, 2.0),
     "vae_variance_total":          (1000.0, 500.0),
-    "vae_diversity_neg_logdet_normalized": (10.0, 5.0),
+    "vae_diversity_logdet_normalized": (-10.0, 5.0),
     "azimuth_std":                 (5.0, 5.0),
     "camera_diversity_score":      (0.5, 0.25)
 }

@@ -374,15 +374,11 @@ DISPLAY_KEYS = [
     ("garment_diversity_logdet",    "Garment Diversity (log-det)"),
     ("garment_diversity_logdet_raw", "Garment Diversity logdet raw"),
     ("garment_diversity_logdet_normalized", "Garment Diversity logdet norm"),
-    ("garment_diversity_neg_logdet_raw", "Garment Diversity neg-logdet raw"),
-    ("garment_diversity_neg_logdet_normalized", "Garment Diversity neg-logdet norm"),
     ("garment_variance_total",      "Garment Variance Total"),
     # M8
     ("vae_diversity_logdet",        "VAE Diversity (log-det)"),
     ("vae_diversity_logdet_raw",    "VAE Diversity logdet raw"),
     ("vae_diversity_logdet_normalized", "VAE Diversity logdet norm"),
-    ("vae_diversity_neg_logdet_raw", "VAE Diversity neg-logdet raw"),
-    ("vae_diversity_neg_logdet_normalized", "VAE Diversity neg-logdet norm"),
     ("vae_variance_total",          "VAE Variance Total"),
     # M9
     ("azimuth_std",                 "Camera Azimuth Std"),

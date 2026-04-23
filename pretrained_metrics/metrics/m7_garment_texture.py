@@ -136,8 +136,8 @@ class GarmentTextureMetrics:
     def _compute_backend_stats(self, embeddings: List[np.ndarray]) -> Dict[str, float]:
         if len(embeddings) < 2:
             return {
-                "garment_diversity_neg_logdet": float("nan"),
-                "garment_diversity_neg_logdet_normalized": float("nan"),
+                "garment_diversity_logdet": float("nan"),
+                "garment_diversity_logdet_normalized": float("nan"),
                 "garment_variance_total": float("nan"),
                 "garment_embed_dim": float("nan"),
                 "garment_effective_rank": float("nan"),
@@ -162,20 +162,20 @@ class GarmentTextureMetrics:
 
         if effective_rank == 0:
             return {
-                "garment_diversity_neg_logdet": float("inf"),
-                "garment_diversity_neg_logdet_normalized": float("inf"),
+                "garment_diversity_logdet": float("-inf"),
+                "garment_diversity_logdet_normalized": float("-inf"),
                 "garment_variance_total": total_var,
                 "garment_embed_dim": float(k_max),
                 "garment_effective_rank": 0.0,
             }
 
         sig = eigvals[:effective_rank] + self.eps
-        neg_log_det = -float(np.sum(np.log(sig)))
-        neg_log_det_norm = neg_log_det / effective_rank
+        log_det = float(np.sum(np.log(sig)))
+        log_det_norm = log_det / effective_rank
 
         return {
-            "garment_diversity_neg_logdet": neg_log_det,
-            "garment_diversity_neg_logdet_normalized": neg_log_det_norm,
+            "garment_diversity_logdet": log_det,
+            "garment_diversity_logdet_normalized": log_det_norm,
             "garment_variance_total": total_var,
             "garment_embed_dim": float(effective_rank),
             "garment_effective_rank": float(effective_rank),
@@ -187,8 +187,8 @@ class GarmentTextureMetrics:
             per_backend[backend] = self._compute_backend_stats(embs)
 
         keys = [
-            "garment_diversity_neg_logdet",
-            "garment_diversity_neg_logdet_normalized",
+            "garment_diversity_logdet",
+            "garment_diversity_logdet_normalized",
             "garment_variance_total",
             "garment_embed_dim",
             "garment_effective_rank",
@@ -214,47 +214,40 @@ class GarmentTextureMetrics:
                 weighted[key] = float(sum(v * w for v, w in zip(vals, ws)) / wsum)
 
         out = dict(weighted)
-        out["garment_diversity_neg_logdet_raw"] = weighted.get("garment_diversity_neg_logdet", float("nan"))
-        out["garment_diversity_logdet_raw"] = (
-            -out["garment_diversity_neg_logdet_raw"]
-            if not np.isnan(out["garment_diversity_neg_logdet_raw"])
-            else float("nan")
-        )
-        out["garment_diversity_logdet"] = (
-            -weighted["garment_diversity_neg_logdet"]
-            if not np.isnan(weighted["garment_diversity_neg_logdet"])
-            else float("nan")
-        )
-        out["garment_diversity_logdet_normalized"] = (
-            -weighted["garment_diversity_neg_logdet_normalized"]
-            if not np.isnan(weighted["garment_diversity_neg_logdet_normalized"])
-            else float("nan")
+        out["garment_diversity_logdet_raw"] = weighted.get("garment_diversity_logdet", float("nan"))
+        out["garment_diversity_neg_logdet"] = out.get("garment_diversity_logdet", float("nan"))
+        out["garment_diversity_neg_logdet_raw"] = out.get("garment_diversity_logdet_raw", float("nan"))
+        out["garment_diversity_neg_logdet_normalized"] = out.get(
+            "garment_diversity_logdet_normalized",
+            float("nan"),
         )
 
-        def _norm_score_from_neg_logdet(v: float) -> float:
-            # Lower normalized neg-logdet indicates larger spread/diversity.
-            # Map to [0,1] with higher = better diversity.
+        def _norm_score_from_logdet(v: float) -> float:
+            # Higher normalized log-det indicates larger spread/diversity.
             if np.isnan(v) or np.isinf(v):
                 return float("nan")
-            if v < 0:
-                v = 0.0
-            return float(1.0 / (1.0 + v))
+            return float(1.0 / (1.0 + np.exp(-v)))
 
         for backend, stats in per_backend.items():
-            out[f"garment_{backend}_diversity_neg_logdet_raw"] = stats["garment_diversity_neg_logdet"]
-            out[f"garment_{backend}_diversity_neg_logdet"] = stats["garment_diversity_neg_logdet"]
-            out[f"garment_{backend}_diversity_neg_logdet_normalized"] = stats[
-                "garment_diversity_neg_logdet_normalized"
+            out[f"garment_{backend}_diversity_logdet_raw"] = stats["garment_diversity_logdet"]
+            out[f"garment_{backend}_diversity_logdet"] = stats["garment_diversity_logdet"]
+            out[f"garment_{backend}_diversity_logdet_normalized"] = stats[
+                "garment_diversity_logdet_normalized"
             ]
-            out[f"garment_{backend}_score_0_1"] = _norm_score_from_neg_logdet(
-                stats["garment_diversity_neg_logdet_normalized"]
+            out[f"garment_{backend}_diversity_neg_logdet_raw"] = out[f"garment_{backend}_diversity_logdet_raw"]
+            out[f"garment_{backend}_diversity_neg_logdet"] = out[f"garment_{backend}_diversity_logdet"]
+            out[f"garment_{backend}_diversity_neg_logdet_normalized"] = out[
+                f"garment_{backend}_diversity_logdet_normalized"
+            ]
+            out[f"garment_{backend}_score_0_1"] = _norm_score_from_logdet(
+                stats["garment_diversity_logdet_normalized"]
             )
             out[f"garment_{backend}_variance_total"] = stats["garment_variance_total"]
             out[f"garment_{backend}_effective_rank"] = stats["garment_effective_rank"]
             out[f"garment_weight_{backend}"] = float(self._encoder.weights.get(backend, 0.0))
 
-        out["garment_ensemble_score_0_1"] = _norm_score_from_neg_logdet(
-            out["garment_diversity_neg_logdet_normalized"]
+        out["garment_ensemble_score_0_1"] = _norm_score_from_logdet(
+            out["garment_diversity_logdet_normalized"]
         )
         out["garment_backends_active"] = float(len(self._encoder._models))
         return out

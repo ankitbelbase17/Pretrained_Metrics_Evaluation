@@ -244,9 +244,9 @@ class VAELatentMetric:
                 "vae_diversity_logdet":          float("-inf"),
                 "vae_diversity_logdet_raw":      float("-inf"),
                 "vae_diversity_logdet_normalized": float("-inf"),
-                "vae_diversity_neg_logdet_raw":      float("inf"),
-                "vae_diversity_neg_logdet":      float("inf"),
-                "vae_diversity_neg_logdet_normalized":  float("inf"),
+                "vae_diversity_neg_logdet_raw":      float("-inf"),
+                "vae_diversity_neg_logdet":      float("-inf"),
+                "vae_diversity_neg_logdet_normalized":  float("-inf"),
                 "vae_variance_total":        total_var,
                 "vae_embed_dim":             D,
                 "vae_effective_rank":        0,
@@ -254,23 +254,19 @@ class VAELatentMetric:
                 "backend":                   self._encoder.backend_name,
             }
 
-        # Negative log-det over significant eigenvalues only
+        # Log-det over significant eigenvalues only
         eps = 1e-6
         reg_eigvals = sig_eigvals + eps
-        neg_log_det = -float(np.sum(np.log(reg_eigvals)))
-
-        # Normalised negative log-det (per effective dimension)
-        neg_log_det_norm = neg_log_det / effective_rank
-        log_det = -neg_log_det
-        log_det_norm = -neg_log_det_norm
+        log_det = float(np.sum(np.log(reg_eigvals)))
+        log_det_norm = log_det / effective_rank
 
         return {
             "vae_diversity_logdet":          log_det,
             "vae_diversity_logdet_raw":      log_det,
             "vae_diversity_logdet_normalized": log_det_norm,
-            "vae_diversity_neg_logdet_raw":      neg_log_det,
-            "vae_diversity_neg_logdet":      neg_log_det,
-            "vae_diversity_neg_logdet_normalized":  neg_log_det_norm,
+            "vae_diversity_neg_logdet_raw":      log_det,
+            "vae_diversity_neg_logdet":      log_det,
+            "vae_diversity_neg_logdet_normalized":  log_det_norm,
             "vae_variance_total":        total_var,
             "vae_embed_dim":             D,
             "vae_effective_rank":        effective_rank,
