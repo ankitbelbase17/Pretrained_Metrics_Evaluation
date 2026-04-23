@@ -43,6 +43,19 @@ datasets:
   - name: dresscode
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/dresscode
     split: test
+    dresscode_category: all
+  - name: dresscode
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/dresscode
+    split: test
+    dresscode_category: upper_body
+  - name: dresscode
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/dresscode
+    split: test
+    dresscode_category: lower_body
+  - name: dresscode
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/dresscode
+    split: test
+    dresscode_category: dresses
 
   - name: street_tryon
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/street_tryon

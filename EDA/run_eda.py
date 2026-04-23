@@ -72,6 +72,7 @@ from plots.p8_meta_correlation import (
 from plots.p9_vae_eda          import (
     plot_vae_pca, plot_vae_pca_combined, plot_vae_explained_variance, plot_vae_tsne
 )
+from plots.p10_camera_angle_eda import run_camera_angle_eda, plot_camera_angle_comparison
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,6 +202,22 @@ def run_all_plots(
         else:
             print("\n  [P9] Skipping VAE plots (no vae_embs in cache)")
 
+    # ── P10: Camera Angle (explicit azimuth/elevation only) ─────────
+    if "p10" not in skip:
+        has_cam = any(("azimuths" in d and "elevations" in d) for d in all_data.values())
+        if has_cam:
+            print("\n  [P10] Camera angle …")
+            cam_dir = str(P / "camera_angle")
+            cam_sets = {}
+            for name, d in all_data.items():
+                if "azimuths" in d and "elevations" in d:
+                    run_camera_angle_eda(d, dataset_name=name, output_dir=cam_dir)
+                    cam_sets[name] = {"azimuths": d["azimuths"], "elevations": d["elevations"]}
+            if len(cam_sets) >= 2:
+                plot_camera_angle_comparison(cam_sets, output_dir=cam_dir)
+        else:
+            print("\n  [P10] Skipping camera-angle plots (no explicit azimuth/elevation in cache)")
+
     print("\n  ✓  All EDA figures complete.")
     print(f"     Output → {P.resolve()}/\n")
 
@@ -226,6 +243,8 @@ def _make_synthetic_data(n: int = 200, seed: int = 0) -> dict:
         face_embs   = rng.normal(0, 1, (n, 512)).astype(np.float32),
         garment_embs= rng.normal(0, 1, (n, 512)).astype(np.float32),
         vae_embs    = rng.normal(0, 1, (n, 4*64*48)).astype(np.float32),
+        azimuths    = rng.uniform(-180, 180, n).astype(np.float32),
+        elevations  = rng.uniform(-45, 45, n).astype(np.float32),
     )
 
 

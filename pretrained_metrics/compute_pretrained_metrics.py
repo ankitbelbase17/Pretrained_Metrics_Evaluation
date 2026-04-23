@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 import time
 import warnings
@@ -133,17 +134,39 @@ def evaluate_one_dataset(
     print(f"{'='*65}")
 
     # ── DataLoader ────────────────────────────────────────────────────────────
+    is_dresscode = "dresscode" in dataset_name.lower()
+    dresscode_cat = cfg.get("dresscode_category", "upper_body") if is_dresscode else None
+    loaders: List = []
     try:
-        loader = get_dataloader(
-            dataset_name, root,
-            split=split,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            img_size=img_size,
-            **({} if "dresscode" not in dataset_name.lower()
-               else {"category": cfg.get("dresscode_category", "upper_body")}),
-        )
-        n_samples = len(loader.dataset)
+        if is_dresscode and str(dresscode_cat).lower() == "all":
+            for cat in ["upper_body", "lower_body", "dresses"]:
+                try:
+                    ld = get_dataloader(
+                        dataset_name, root,
+                        split=split,
+                        batch_size=batch_size,
+                        num_workers=num_workers,
+                        img_size=img_size,
+                        category=cat,
+                    )
+                    loaders.append((cat, ld))
+                except Exception as e:
+                    print(f"  [WARN] DressCode category '{cat}' skipped: {e}")
+            if not loaders:
+                print("  [SKIP] No DressCode categories could be loaded.")
+                return {}
+            n_samples = sum(len(ld.dataset) for _, ld in loaders)
+        else:
+            ld = get_dataloader(
+                dataset_name, root,
+                split=split,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                img_size=img_size,
+                **({} if not is_dresscode else {"category": dresscode_cat}),
+            )
+            loaders = [(str(dresscode_cat) if is_dresscode else "default", ld)]
+            n_samples = len(ld.dataset)
     except (FileNotFoundError, RuntimeError, Exception) as e:
         print(f"  [SKIP] {e}")
         import traceback
@@ -165,19 +188,21 @@ def evaluate_one_dataset(
 
     # ── Batch loop ────────────────────────────────────────────────────────────
     t0 = time.time()
-    for batch in tqdm(loader, desc=f"  {dataset_name}", unit="batch"):
-        person = batch["person"].float()   # (B,3,H,W)
-        cloth  = batch["cloth"].float()    # (B,3,H,W)
+    for cat_name, loader in loaders:
+        desc_name = dataset_name if not is_dresscode else f"{dataset_name}:{cat_name}"
+        for batch in tqdm(loader, desc=f"  {desc_name}", unit="batch"):
+            person = batch["person"].float()   # (B,3,H,W)
+            cloth  = batch["cloth"].float()    # (B,3,H,W)
 
-        if m1: m1.update(person)
-        if m2: m2.update(person)
-        if m3: m3.update(person)
-        if m4: m4.update(person)
-        if m5: m5.update(person)
-        if m6: m6.update(person)
-        if m7: m7.update(cloth)
-        if m8: m8.update(person)
-        if m9: m9.update(person)
+            if m1: m1.update(person)
+            if m2: m2.update(person)
+            if m3: m3.update(person)
+            if m4: m4.update(person)
+            if m5: m5.update(person)
+            if m6: m6.update(person)
+            if m7: m7.update(cloth)
+            if m8: m8.update(person)
+            if m9: m9.update(person)
 
     elapsed = time.time() - t0
 
@@ -192,9 +217,10 @@ def evaluate_one_dataset(
     r8 = m8.compute() if m8 else {}
     r9 = m9.compute() if m9 else {}
 
-    dresscode_cat = cfg.get("dresscode_category") if "dresscode" in dataset_name.lower() else None
+    dresscode_cat = cfg.get("dresscode_category") if is_dresscode else None
     result = {
         "dataset":   dataset_name,
+        "split":     split,
         **({"dresscode_category": dresscode_cat} if dresscode_cat else {}),
         "n_samples": n_samples,
         "elapsed_s": round(elapsed, 2),
@@ -257,6 +283,9 @@ def _print_result_box(r: dict):
     name = r["dataset"].upper()
     if "dresscode_category" in r:
         name = f"{name} [{r['dresscode_category']}]"
+    split = r.get("split")
+    if split:
+        name = f"{name} | split={split}"
     print(f"\n  ┌{'─'*W}┐")
     print(f"  │{'Results — ' + name:^{W}}│")
     print(f"  ├{'─'*W}┤")
@@ -391,6 +420,43 @@ def _save(all_results: List[dict], output_dir: str, uci_scores: List[dict],
         print(f"  CSV (raw + normalized columns) saved → {csv}")
     except ImportError:
         pass
+
+    # ── Per-dataset JSONs (in addition to consolidated files) ───────────────
+    def _tok(v: object, default: str = "na") -> str:
+        s = str(v).strip() if v is not None else ""
+        if not s:
+            s = default
+        s = re.sub(r"[^A-Za-z0-9._-]+", "_", s)
+        return s.strip("._-") or default
+
+    per_ds_dir = out / "per_dataset_json"
+    per_ds_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
+
+    for i, r in enumerate(all_results):
+        ds = _tok(r.get("dataset"), "dataset")
+        sp = _tok(r.get("split"), "split")
+        cat = _tok(r.get("dresscode_category"), "")
+        suffix = f"_{cat}" if cat else ""
+        fn = f"{ds}_{sp}{suffix}_{ts}.json"
+        path = per_ds_dir / fn
+
+        payload = {
+            "dataset": r.get("dataset"),
+            "split": r.get("split"),
+            "dresscode_category": r.get("dresscode_category"),
+            "timestamp": ts,
+            "raw_metrics": r,
+        }
+        if i < len(uci_scores):
+            payload["uci"] = uci_scores[i]
+
+        with open(path, "w") as f:
+            json.dump(payload, f, indent=2, default=str)
+        written += 1
+
+    if written:
+        print(f"  Per-dataset JSONs saved → {per_ds_dir} ({written} files)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -116,7 +116,7 @@ class FeatureExtractor:
             print("[FeatureExtractor] Camera-angle backend ready.")
         except Exception as e:
             print(f"[FeatureExtractor] Camera-angle backend unavailable ({e}). "
-                  "P10 will use pose-proxy fallback.")
+                  "Camera-angle features (azimuth/elevation) will be absent.")
         print("[FeatureExtractor] All backends ready.")
 
     # ── single-image extraction (used by run_curvton_eda) ─────────────── #

@@ -400,10 +400,8 @@ def plot_clip_image_embeddings(
         fig.tight_layout()
         
         suffix = f"_by_{color_by}"
-        save_fig(fig, out_path / f"clip_image_pca{suffix}.pdf")
-        save_fig(fig, out_path / f"clip_image_pca{suffix}.png", dpi=150)
-        plt.close(fig)
-        print(f"  Saved: clip_image_pca{suffix}.pdf")
+        save_fig(fig, out_path, f"clip_image_pca{suffix}", formats=("pdf", "png"), dpi=600)
+        print(f"  Saved: clip_image_pca{suffix}.pdf/.png")
     
     # ── t-SNE ─────────────────────────────────────────────────────────────
     if method in ["tsne", "both"]:
@@ -464,10 +462,8 @@ def plot_clip_image_embeddings(
         fig.tight_layout()
         
         suffix = f"_by_{color_by}"
-        save_fig(fig, out_path / f"clip_image_tsne{suffix}.pdf")
-        save_fig(fig, out_path / f"clip_image_tsne{suffix}.png", dpi=150)
-        plt.close(fig)
-        print(f"  Saved: clip_image_tsne{suffix}.pdf")
+        save_fig(fig, out_path, f"clip_image_tsne{suffix}", formats=("pdf", "png"), dpi=600)
+        print(f"  Saved: clip_image_tsne{suffix}.pdf/.png")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -560,10 +556,8 @@ def plot_clip_text_embeddings(
         despine_axes(ax)
         fig.tight_layout()
         
-        save_fig(fig, out_path / "clip_text_pca.pdf")
-        save_fig(fig, out_path / "clip_text_pca.png", dpi=150)
-        plt.close(fig)
-        print("  Saved: clip_text_pca.pdf")
+        save_fig(fig, out_path, "clip_text_pca", formats=("pdf", "png"), dpi=600)
+        print("  Saved: clip_text_pca.pdf/.png")
     
     # ── t-SNE ─────────────────────────────────────────────────────────────
     if method in ["tsne", "both"] and len(unique_names) > 5:
@@ -612,10 +606,8 @@ def plot_clip_text_embeddings(
         despine_axes(ax)
         fig.tight_layout()
         
-        save_fig(fig, out_path / "clip_text_tsne.pdf")
-        save_fig(fig, out_path / "clip_text_tsne.png", dpi=150)
-        plt.close(fig)
-        print("  Saved: clip_text_tsne.pdf")
+        save_fig(fig, out_path, "clip_text_tsne", formats=("pdf", "png"), dpi=600)
+        print("  Saved: clip_text_tsne.pdf/.png")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -704,10 +696,8 @@ def plot_combined_embeddings(
     despine_axes(ax)
     fig.tight_layout()
     
-    save_fig(fig, out_path / "clip_combined_space.pdf")
-    save_fig(fig, out_path / "clip_combined_space.png", dpi=150)
-    plt.close(fig)
-    print("  Saved: clip_combined_space.pdf")
+    save_fig(fig, out_path, "clip_combined_space", formats=("pdf", "png"), dpi=600)
+    print("  Saved: clip_combined_space.pdf/.png")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -751,10 +741,8 @@ def plot_cloth_category_distribution(
     despine_axes(ax)
     fig.tight_layout()
     
-    save_fig(fig, out_path / "cloth_category_distribution.pdf")
-    save_fig(fig, out_path / "cloth_category_distribution.png", dpi=150)
-    plt.close(fig)
-    print("  Saved: cloth_category_distribution.pdf")
+    save_fig(fig, out_path, "cloth_category_distribution", formats=("pdf", "png"), dpi=600)
+    print("  Saved: cloth_category_distribution.pdf/.png")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

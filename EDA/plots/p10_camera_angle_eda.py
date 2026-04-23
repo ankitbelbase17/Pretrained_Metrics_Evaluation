@@ -3,8 +3,8 @@ EDA/plots/p10_camera_angle_eda.py
 =================================
 Camera-angle EDA plots.
 
-Uses explicit camera angles when available (azimuth/elevation), and falls back
-to a pose-based proxy from pose_vecs so camera plots can still be generated.
+Uses explicit camera-angle outputs (azimuth/elevation) only.
+No pose-based proxy fallback is used.
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 try:
-    from plot_style import apply_paper_style, PALETTE
+    from plot_style import apply_paper_style, PALETTE, save_fig
 except ImportError:
-    from ..plot_style import apply_paper_style, PALETTE
+    from ..plot_style import apply_paper_style, PALETTE, save_fig
 
 
 def _get_color_palette(n: int):
@@ -72,7 +72,7 @@ def _estimate_camera_proxy_from_pose(pose_vecs: np.ndarray) -> Tuple[np.ndarray,
 
 
 def extract_camera_angles(features: Dict[str, np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
-    """Get (azimuths, elevations) from features, with pose-based fallback."""
+    """Get (azimuths, elevations) from explicit camera-angle features only."""
     azimuths = features.get("azimuths", features.get("azimuth", np.array([])))
     elevations = features.get("elevations", features.get("elevation", np.array([])))
 
@@ -81,10 +81,6 @@ def extract_camera_angles(features: Dict[str, np.ndarray]) -> Tuple[np.ndarray, 
         el = np.asarray(elevations if len(elevations) > 0 else np.zeros_like(az), dtype=np.float32)
         valid = np.isfinite(az) & np.isfinite(el)
         return az[valid], el[valid]
-
-    pose = features.get("pose_vecs", np.array([]))
-    if len(pose) > 0:
-        return _estimate_camera_proxy_from_pose(np.asarray(pose))
 
     return np.array([]), np.array([])
 
@@ -172,10 +168,10 @@ def plot_camera_angle_distribution(
     ax_pie.set_title(f"View Category Distribution\n({dataset_name})", fontsize=11)
 
     plt.tight_layout()
-    path = os.path.join(output_dir, f"camera_angle_distribution_{dataset_name.lower().replace(' ', '_')}.pdf")
-    plt.savefig(path, dpi=300, bbox_inches="tight")
-    plt.close()
-    saved_paths["distribution"] = path
+    stem = f"camera_angle_distribution_{dataset_name.lower().replace(' ', '_')}"
+    save_fig(fig, output_dir, stem, formats=("pdf", "png"), dpi=600)
+    saved_paths["distribution_pdf"] = os.path.join(output_dir, f"{stem}.pdf")
+    saved_paths["distribution_png"] = os.path.join(output_dir, f"{stem}.png")
 
     # 2D heatmap
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -195,10 +191,10 @@ def plot_camera_angle_distribution(
     ax.set_title(f"Camera Angle Heatmap - {dataset_name}", fontsize=12)
 
     plt.tight_layout()
-    path = os.path.join(output_dir, f"camera_angle_heatmap_{dataset_name.lower().replace(' ', '_')}.pdf")
-    plt.savefig(path, dpi=300, bbox_inches="tight")
-    plt.close()
-    saved_paths["heatmap"] = path
+    stem = f"camera_angle_heatmap_{dataset_name.lower().replace(' ', '_')}"
+    save_fig(fig, output_dir, stem, formats=("pdf", "png"), dpi=600)
+    saved_paths["heatmap_pdf"] = os.path.join(output_dir, f"{stem}.pdf")
+    saved_paths["heatmap_png"] = os.path.join(output_dir, f"{stem}.png")
 
     return saved_paths
 
@@ -302,10 +298,9 @@ def plot_camera_angle_comparison(
     ax.set_ylim(0, 1)
 
     plt.tight_layout()
-    path = os.path.join(output_dir, "camera_angle_comparison.pdf")
-    plt.savefig(path, dpi=300, bbox_inches="tight")
-    plt.close()
-    return path
+    stem = "camera_angle_comparison"
+    save_fig(fig, output_dir, stem, formats=("pdf", "png"), dpi=600)
+    return os.path.join(output_dir, f"{stem}.png")
 
 
 def run_camera_angle_eda(
@@ -317,7 +312,10 @@ def run_camera_angle_eda(
     azimuths, elevations = extract_camera_angles(features)
 
     if len(azimuths) == 0:
-        print(f"[CameraAngleEDA] No camera-angle or pose proxy found for {dataset_name}")
+        print(
+            f"[CameraAngleEDA] No explicit camera-angle features found for {dataset_name}. "
+            "Re-extract with camera backend enabled."
+        )
         return {}
 
     return plot_camera_angle_distribution(

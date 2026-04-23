@@ -133,6 +133,7 @@ _FEATURE_KEYS       = [
     "pose_vecs", "angles", "occlusion", "bg_entropy",
     "bg_obj_count", "lum_mean", "lum_grad_var",
     "betas", "face_embs", "garment_embs",
+    "azimuths", "elevations", "camera_confidence",
 ]
 
 
@@ -319,6 +320,30 @@ def _extract_garment(loader, tf, device, batch_size, verbose, **kw):
     return {"garment_embs": garment_embs}
 
 
+def _extract_camera(loader, tf, device, batch_size, verbose, **kw):
+    from pretrained_metrics.metrics.m9_camera_angle import _CameraAngleBackend
+    if verbose:
+        print("\n    [camera] Loading backend...")
+    backend = _CameraAngleBackend(device)
+    azimuths, elevations, confidence = [], [], []
+    for person_batch, _ in _batched(loader, tf, batch_size, verbose, **kw):
+        cam = backend.estimate_angles(person_batch)
+        az = cam["azimuth"].detach().cpu().numpy().astype(np.float32)
+        el = cam["elevation"].detach().cpu().numpy().astype(np.float32)
+        cf = cam["confidence"].detach().cpu().numpy().astype(np.float32)
+        azimuths.extend(az.tolist())
+        elevations.extend(el.tolist())
+        confidence.extend(cf.tolist())
+    del backend; _free_gpu()
+    if verbose:
+        print(f"    [camera] Done ({len(azimuths)} samples)")
+    return {
+        "azimuths": azimuths,
+        "elevations": elevations,
+        "camera_confidence": confidence,
+    }
+
+
 # Ordered list: (name, feature_keys, extraction_function)
 _METRIC_EXTRACTORS = [
     ("pose",         ["pose_vecs", "angles"],        _extract_pose),
@@ -328,6 +353,7 @@ _METRIC_EXTRACTORS = [
     ("body_shape",   ["betas"],                      _extract_body_shape),
     ("appearance",   ["face_embs"],                  _extract_appearance),
     ("garment",      ["garment_embs"],               _extract_garment),
+    ("camera",       ["azimuths", "elevations", "camera_confidence"], _extract_camera),
 ]
 
 

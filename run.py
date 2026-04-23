@@ -41,6 +41,7 @@ import sys
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import numpy as np
 from pretrained_metrics.cache_setup import configure_model_caches, DEFAULT_MODEL_BASE
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -159,6 +160,26 @@ def _report_new_artifacts(output_root: Path, before: set[str], phase_label: str)
     print(f"  Photos/plots    : {len(by_kind['photo'])}")
     print(f"  Videos          : {len(by_kind['video'])}")
     print(f"  Other           : {len(by_kind['other'])}")
+
+    # Extension-level counts (helps quickly verify expected plot/metric formats)
+    ext_counts: dict[str, int] = {}
+    for rel in new_files:
+        ext = Path(rel).suffix.lower() or "<noext>"
+        ext_counts[ext] = ext_counts.get(ext, 0) + 1
+    if ext_counts:
+        print("\n  By extension:")
+        for ext, cnt in sorted(ext_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"    - {ext:<8} : {cnt}")
+
+    # Top-level directory breakdown (metrics/plots/eda_cache/...)
+    dir_counts: dict[str, int] = {}
+    for rel in new_files:
+        top = Path(rel).parts[0] if Path(rel).parts else "."
+        dir_counts[top] = dir_counts.get(top, 0) + 1
+    if dir_counts:
+        print("\n  By directory:")
+        for d, cnt in sorted(dir_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"    - {d:<16} : {cnt}")
 
     def _print_group(title: str, items: list[str], limit: int = 20):
         if not items:
@@ -305,6 +326,44 @@ def _print_no_fallback_execution_report(args):
             print(f"    [FAILED ] {key} {name} | status={status}")
 
 
+def _merge_npz_caches(cache_files: list[Path], out_file: Path, label: str) -> bool:
+    """
+    Merge multiple feature caches by concatenating arrays key-wise.
+    Useful for creating *_all_features.npz from split/category caches.
+    """
+    existing = [p for p in cache_files if p.exists()]
+    if not existing:
+        print(f"  [SKIP] No source caches found for {label}.")
+        return False
+
+    merged: dict[str, list[np.ndarray]] = {}
+    for p in existing:
+        d = dict(np.load(str(p), allow_pickle=True))
+        for k, v in d.items():
+            arr = np.asarray(v)
+            if arr.size == 0:
+                continue
+            merged.setdefault(k, []).append(arr)
+
+    if not merged:
+        print(f"  [SKIP] Source caches for {label} contained no arrays.")
+        return False
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    packed: dict[str, np.ndarray] = {}
+    for k, parts in merged.items():
+        if len(parts) == 1:
+            packed[k] = parts[0]
+            continue
+        try:
+            packed[k] = np.concatenate(parts, axis=0)
+        except Exception:
+            packed[k] = np.array(parts, dtype=object)
+    np.savez_compressed(out_file, **packed)
+    print(f"  [MERGE] {label} cache saved -> {out_file}")
+    return True
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase runners
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -317,9 +376,10 @@ def phase1_pretrained_metrics(args):
     # Always run in config mode:
     # compute_pretrained_metrics.py requires either --config OR (--dataset + --root).
     # The previous multi-GPU branch passed --dataset without --root, which is invalid.
+    metrics_dir = Path(args.output_dir) / "metrics" / "pretrained"
     cli_args = [
         "--config", args.metrics_config,
-        "--output_dir", str(Path(args.output_dir) / "metrics"),
+        "--output_dir", str(metrics_dir),
         "--batch_size", str(args.batch_size),
         "--num_workers", str(args.num_workers),
     ]
@@ -328,7 +388,6 @@ def phase1_pretrained_metrics(args):
         return False
 
     # Sanity-check outputs so silent no-op runs are treated as failures.
-    metrics_dir = Path(args.output_dir) / "metrics"
     has_json = any(metrics_dir.glob("pretrained_metrics_comprehensive_*.json"))
     if not has_json:
         print("  [FATAL ERROR] Phase 1 finished but no comprehensive metrics JSON was produced.")
@@ -339,27 +398,30 @@ def phase1_pretrained_metrics(args):
 
 
 def phase2_curvton_eda(args):
-    """Phase 2: CurvTON-only EDA (easy/medium/hard difficulty plots)."""
-    _banner(2, 4, "CurvTON EDA — Difficulty-Level Plots (easy/medium/hard)")
+    """Phase 2: CurvTON-only EDA (easy/medium/hard + all)."""
+    _banner(2, 4, "CurvTON EDA — Difficulty-Level + Full-Set Plots")
 
     script = "EDA/run_curvton_eda.py"
     cli_args = [
         "--base_path", args.curvton_path,
-        "--out_dir", str(Path(args.output_dir) / "plots"),
+        "--out_dir", str(Path(args.output_dir) / "plots" / "curvton"),
         "--cache_dir", str(Path(args.output_dir) / "eda_cache" / "curvton"),
         "--sample_ratio", str(args.sample_ratio),
+        "--difficulties", "easy", "medium", "hard", "all",
     ]
     return _run_python(script, cli_args, "CurvTON EDA (difficulty splits)", gpus=args.gpus)
 
 
 def phase3_baseline_eda(args):
-    """Phase 3: EDA for each baseline dataset individually."""
-    _banner(3, 4, "Baseline Dataset EDA — VITON-HD, DressCode, StreetTryOn")
+    """Phase 3: Baseline EDA with DressCode per-category + full-set merge."""
+    _banner(3, 4, "Baseline EDA — VITON-HD, DressCode (all categories + full), StreetTryOn")
 
-    baselines = [
-        ("vitonhd",      args.vitonhd_root,      "VITON-HD"),
-        ("dresscode",    args.dresscode_root,     "DressCode"),
-        ("street_tryon", args.street_tryon_root,  "StreetTryOn"),
+    tasks = [
+        {"name": "vitonhd", "root": args.vitonhd_root, "display": "VITON-HD", "extra": []},
+        {"name": "dresscode", "root": args.dresscode_root, "display": "DressCode (upper_body)", "extra": ["--dresscode_category", "upper_body"]},
+        {"name": "dresscode", "root": args.dresscode_root, "display": "DressCode (lower_body)", "extra": ["--dresscode_category", "lower_body"]},
+        {"name": "dresscode", "root": args.dresscode_root, "display": "DressCode (dresses)", "extra": ["--dresscode_category", "dresses"]},
+        {"name": "street_tryon", "root": args.street_tryon_root, "display": "StreetTryOn", "extra": []},
     ]
 
     script = "EDA/run_eda.py"
@@ -369,7 +431,8 @@ def phase3_baseline_eda(args):
         print(f"\n  [Phase 3] Launching baseline EDAs concurrently across {args.gpus} GPUs...")
         with ThreadPoolExecutor(max_workers=args.gpus) as executor:
             futures = []
-            for i, (ds_name, ds_root, display_name) in enumerate(baselines):
+            for i, t in enumerate(tasks):
+                ds_name, ds_root, display_name = t["name"], t["root"], t["display"]
                 if not ds_root: continue
                 cli_args = [
                     "--dataset", ds_name,
@@ -377,8 +440,8 @@ def phase3_baseline_eda(args):
                     "--batch_size", str(args.batch_size),
                     "--num_workers", str(args.num_workers),
                     "--cache_dir", str(Path(args.output_dir) / "eda_cache" / ds_name),
-                    "--out_dir", str(Path(args.output_dir) / "plots"),
-                ]
+                    "--out_dir", str(Path(args.output_dir) / "plots" / "baselines" / ds_name),
+                ] + t["extra"]
                 gpu_id = i % args.gpus
                 futures.append(executor.submit(_run_python, script, cli_args, f"EDA ({display_name})", 1, gpu_id))
             
@@ -386,7 +449,8 @@ def phase3_baseline_eda(args):
                 if not f.result():
                     all_ok = False
     else:
-        for ds_name, ds_root, display_name in baselines:
+        for t in tasks:
+            ds_name, ds_root, display_name = t["name"], t["root"], t["display"]
             if not ds_root:
                 print(f"\n  [SKIP] {display_name} — no root path provided")
                 continue
@@ -398,11 +462,38 @@ def phase3_baseline_eda(args):
                 "--batch_size", str(args.batch_size),
                 "--num_workers", str(args.num_workers),
                 "--cache_dir", str(Path(args.output_dir) / "eda_cache" / ds_name),
-                "--out_dir", str(Path(args.output_dir) / "plots"),
-            ]
+                "--out_dir", str(Path(args.output_dir) / "plots" / "baselines" / ds_name),
+            ] + t["extra"]
             ok = _run_python(script, cli_args, f"EDA ({display_name})", gpus=1)
             if not ok:
                 all_ok = False
+
+    # Build DressCode full-set cache by merging all three categories.
+    dc_dir = Path(args.output_dir) / "eda_cache" / "dresscode"
+    _merge_npz_caches(
+        [
+            dc_dir / "dresscode_upper_body_features.npz",
+            dc_dir / "dresscode_lower_body_features.npz",
+            dc_dir / "dresscode_dresses_features.npz",
+        ],
+        dc_dir / "dresscode_all_features.npz",
+        label="DressCode (all categories)",
+    )
+
+    # Build CurvTON full-set cache from split caches if not already present.
+    curv_dir = Path(args.output_dir) / "eda_cache" / "curvton"
+    ratio_pct = int(args.sample_ratio * 100)
+    curv_all = curv_dir / f"curvton_all_{ratio_pct}pct.npz"
+    if not curv_all.exists():
+        _merge_npz_caches(
+            [
+                curv_dir / f"curvton_easy_{ratio_pct}pct.npz",
+                curv_dir / f"curvton_medium_{ratio_pct}pct.npz",
+                curv_dir / f"curvton_hard_{ratio_pct}pct.npz",
+            ],
+            curv_all,
+            label="CurvTON (all splits)",
+        )
 
     return all_ok
 
@@ -418,7 +509,7 @@ def phase4_comparison_plots(args):
 
     # CurvTON difficulty caches (from run_curvton_eda.py — stored as npz per difficulty)
     curvton_cache = cache_base / "curvton"
-    for diff in ["easy", "medium", "hard"]:
+    for diff in ["easy", "medium", "hard", "all"]:
         # run_curvton_eda saves as curvton_{diff}_{pct}pct.npz
         ratio_pct = int(args.sample_ratio * 100)
         npz_file = curvton_cache / f"curvton_{diff}_{ratio_pct}pct.npz"
@@ -433,6 +524,12 @@ def phase4_comparison_plots(args):
         ("street_tryon", "StreetTryOn"),
     ]:
         ds_dir = cache_base / ds_name
+        all_cache = ds_dir / f"{ds_name}_all_features.npz"
+        if all_cache.exists():
+            cache_dirs.append(str(all_cache))
+            labels.append(display_name)
+            continue
+
         primary = ds_dir / f"{ds_name}_features.npz"
         if primary.exists():
             cache_dirs.append(str(primary))
@@ -459,7 +556,7 @@ def phase4_comparison_plots(args):
     # (run_eda.py --figs_only expects cache_dir with {label}_features.npz naming)
     comparison_script = str(Path(args.output_dir) / "_run_comparison.py")
     _write_comparison_script(comparison_script, cache_dirs, labels,
-                             str(Path(args.output_dir) / "plots"))
+                             str(Path(args.output_dir) / "plots" / "comparison"))
 
     ok = _run_python(comparison_script, [], "Comparison overlay plots")
 
@@ -509,7 +606,7 @@ def phase5_radar_chart(args):
     
     # Find the most recent comprehensive JSON
     import glob
-    metrics_dir = Path(args.output_dir) / "metrics"
+    metrics_dir = Path(args.output_dir) / "metrics" / "pretrained"
     json_files = glob.glob(str(metrics_dir / "pretrained_metrics_comprehensive_*.json"))
     if not json_files:
         print("  [SKIP] No comprehensive JSON metrics found. Run Phase 1 first.")
@@ -610,6 +707,12 @@ def main():
     (output_root / "metrics").mkdir(parents=True, exist_ok=True)
     (output_root / "plots").mkdir(parents=True, exist_ok=True)
     (output_root / "eda_cache").mkdir(parents=True, exist_ok=True)
+    # Create common structured subdirectories up front.
+    (output_root / "metrics" / "pretrained").mkdir(parents=True, exist_ok=True)
+    (output_root / "plots" / "curvton").mkdir(parents=True, exist_ok=True)
+    (output_root / "plots" / "baselines").mkdir(parents=True, exist_ok=True)
+    (output_root / "plots" / "comparison").mkdir(parents=True, exist_ok=True)
+    (output_root / "plots" / "radar").mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
     print("  UNIFIED PIPELINE: Pretrained Metrics + EDA")
@@ -702,8 +805,9 @@ def main():
                  5: "Radar Chart"}
         print(f"  {status} Phase {phase_id}: {names[phase_id]}")
     print(f"\n  Outputs saved to: {output_root.resolve()}")
-    print(f"    Metrics       : metrics/")
-    print(f"    Plots         : plots/")
+    print(f"    Metrics       : metrics/pretrained/")
+    print(f"    Plots         : plots/curvton | plots/baselines | plots/comparison | plots/radar")
+    print(f"    EDA cache     : eda_cache/<dataset_or_group>/")
     print("=" * 70)
 
     failed = [phase_id for phase_id, ok in sorted(results.items()) if not ok]
