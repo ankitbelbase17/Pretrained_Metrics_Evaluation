@@ -1,7 +1,7 @@
 """
 test.py
 =======
-Compute smoke-test for pretrained metrics (M1-M9) and EDA plots using CurvTON-easy.
+Compute smoke-test for pretrained metrics (M1-M9) and EDA plots using CurvTON-hard.
 
 What this script does:
 1. Builds a small dataloader from CurvTON easy split.
@@ -915,7 +915,7 @@ def _print_table(title: str, headers: List[str], rows: List[List[object]]):
 def run_checks(args) -> int:
     cache_info = configure_model_caches(args.download_base, set_home_for_hmr2=True)
     print("\n" + "=" * 90)
-    print("  Pretrained Metrics + EDA Compute Smoke-Test (CurvTON easy)")
+    print("  Pretrained Metrics + EDA Compute Smoke-Test (CurvTON hard)")
     print(f"  device={args.device} | root={args.curvton_easy_root}")
     print(f"  batch_size={args.batch_size} | max_batches={args.max_batches} | split={args.split}")
     print(f"  download_base={cache_info['base_path']}")
@@ -1115,7 +1115,7 @@ def run_checks(args) -> int:
 
 def _parse():
     p = argparse.ArgumentParser(
-        description="Compute smoke-test for M1-M9 and EDA using CurvTON easy dataloader."
+        description="Compute smoke-test for M1-M9 and EDA using CurvTON hard dataloader."
     )
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--skip", nargs="*", default=[], help="Skip keys by substring, e.g. m8 p9 vlm")
@@ -1125,8 +1125,8 @@ def _parse():
     p.add_argument(
         "--curvton_easy_root",
         type=str,
-        default="/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/easy",
-        help="Absolute path to CurvTON easy split root",
+        default="/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/hard",
+        help="Absolute path to CurvTON hard split root",
     )
     p.add_argument("--dataset_name", type=str, default="curvton", help="Dataset registry name")
     p.add_argument("--split", type=str, default="test")
