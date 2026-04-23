@@ -85,7 +85,8 @@ class _FaceEmbedder:
             ctx_id = -1
             with contextlib.redirect_stdout(quiet_out), contextlib.redirect_stderr(quiet_out):
                 self._app = FaceAnalysis(providers=providers)
-                self._app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+                # Use smaller detection size for faster, lower-memory face detection
+                self._app.prepare(ctx_id=ctx_id, det_size=(320, 320))
             self._backend = "arcface"
             print("[AppearanceMetric] Using InsightFace ArcFace (CPUExecutionProvider).")
             return

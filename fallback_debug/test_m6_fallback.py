@@ -27,7 +27,7 @@ def try_arcface() -> str:
     chosen = ["CPUExecutionProvider"]
     ctx_id = -1
     app = FaceAnalysis(providers=chosen)
-    app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+    app.prepare(ctx_id=ctx_id, det_size=(320, 320))
     return f"appearance_backend=arcface, provider={chosen[0]}"
 
 
