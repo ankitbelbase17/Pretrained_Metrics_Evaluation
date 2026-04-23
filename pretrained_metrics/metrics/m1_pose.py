@@ -254,12 +254,18 @@ class PoseMetrics:
         sign, log_det = np.linalg.slogdet(reg)
         d_pose = float(log_det) if sign > 0 else float("nan")
 
-        # 1B — Complexity
+        # 1B — Complexity (Absolute magnitude per sample, NOT dataset variance)
         c_artic = 0.0
+        valid_limbs = 0
         for t_idx in range(len(TRIPLET_IDX)):
             angles = self._all_angles[t_idx]
-            if len(angles) > 1:
-                c_artic += float(np.var(angles))
+            if len(angles) > 0:
+                # Average angle (how bent the limb is)
+                c_artic += float(np.mean(np.abs(np.array(angles) - math.pi))) # Deviation from straight (pi)
+                valid_limbs += 1
+        
+        if valid_limbs > 0:
+            c_artic = c_artic / valid_limbs
 
         artic_per_image = [v for v in self._per_image_artic if not math.isnan(v)]
 

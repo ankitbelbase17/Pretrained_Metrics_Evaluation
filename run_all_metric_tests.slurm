@@ -7,7 +7,8 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=400G
 #SBATCH --time=04:00:00
-#SBATCH --partition=gpu
+#SBATCH --account=a168
+#SBATCH --partition=normal
 
 # =============================================================================
 # Run all per-metric standalone smoke-tests (M1–M9)

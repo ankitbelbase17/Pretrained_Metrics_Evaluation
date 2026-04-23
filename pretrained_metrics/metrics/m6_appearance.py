@@ -142,8 +142,11 @@ class ParametricFaceMetric:
         eigvals = np.linalg.eigvalsh(cov)
         eigvals = np.sort(eigvals)[::-1]
         
-        # Complexity is total variance
+        # Diversity total variance
         variance_total = float(np.sum(eigvals))
+        
+        # Absolute facial geometry complexity (deviation from neutral 0)
+        appearance_complexity_abs = float(np.mean(np.linalg.norm(E, axis=1)))
 
         # ── Compute Parametric Diversity (LogDet of principal cov) ─────
         if variance_total > 0:
@@ -165,7 +168,7 @@ class ParametricFaceMetric:
         mean_pwise = float(variance_total / D)
 
         return {
-            "appearance_complexity": variance_total,     
+            "appearance_complexity": appearance_complexity_abs,     
             "appearance_diversity_mean": neg_log_det_norm, # unified_index uses this key currently
             "appearance_diversity_logdet": log_det,
             "n_faces": N

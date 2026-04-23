@@ -44,13 +44,13 @@ METRIC_ONTOLOGY = {
     },
     "4_Illumination": {
         "name": "Illumination",
-        "c_key": "illumination_complexity",
+        "c_key": "illumination_gradient_mean",
         "d_key": "luminance_var_global", 
         "w": 1.0
     },
     "5_BodyShape": {
         "name": "Body Shape",
-        "c_key": "shape_variance_total",       # Deformation magnitude proxy
+        "c_key": "shape_complexity_abs",       # Deformation magnitude proxy
         "d_key": "shape_diversity_logdet",
         "w": 1.0
     },
@@ -68,13 +68,13 @@ METRIC_ONTOLOGY = {
     },
     "8_VAELatent": {
         "name": "VAE Latent",
-        "c_key": "vae_variance_total",         # Overall signal energy
+        "c_key": "vae_complexity_abs",         # Overall signal energy
         "d_key": "vae_diversity_neg_logdet_normalized",
         "w": 1.0
     },
     "9_CameraAngle": {
         "name": "Camera Angle",
-        "c_key": "azimuth_std",                # Or elevation_mean if present
+        "c_key": "camera_complexity_abs",                # Or elevation_mean if present
         "d_key": "camera_diversity_score",
         "w": 1.0
     }
