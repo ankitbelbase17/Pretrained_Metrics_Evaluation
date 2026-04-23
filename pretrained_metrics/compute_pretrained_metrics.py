@@ -231,6 +231,8 @@ def evaluate_one_dataset(
     }
 
     _print_result_box(result)
+    print("  Metrics JSON:")
+    print(json.dumps(result, indent=2, default=str))
     return result
 
 
