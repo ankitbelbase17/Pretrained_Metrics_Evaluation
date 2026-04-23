@@ -972,6 +972,7 @@ def run_checks(args) -> int:
 
     print(_cyan("EDA COMPUTE AUDIT"))
     print("-" * 90)
+    eda_rows: List[EDASummary] = []
     try:
         eda_rows = _run_eda_compute_tests(args.device, batches, args.eda_out_dir)
     except Exception as e:
@@ -979,7 +980,19 @@ def run_checks(args) -> int:
         print(f"      error            : {type(e).__name__}: {e}")
         if args.verbose:
             traceback.print_exc()
-        return failed_count + 1
+        failed_count += 1
+        eda_rows = [
+            EDASummary(
+                key="eda",
+                plot="EDA feature extraction/plot setup",
+                status="FAILED",
+                required_metrics=["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"],
+                selected_mode="setup",
+                fallback_used=False,
+                notes=[],
+                error=f"{type(e).__name__}: {e}",
+            )
+        ]
 
     for row in eda_rows:
         if any(s.lower() in row.key.lower() for s in args.skip):
