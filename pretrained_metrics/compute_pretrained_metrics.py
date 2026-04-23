@@ -276,6 +276,19 @@ def evaluate_one_dataset(
         "elapsed_s": round(elapsed, 2),
         **r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r9,
     }
+    # Derived variance terms (when only std is exposed by backend).
+    if "appearance_diversity_std" in result:
+        sd = result.get("appearance_diversity_std")
+        if isinstance(sd, (int, float)) and not math.isnan(float(sd)):
+            result["appearance_diversity_var"] = float(sd) * float(sd)
+    if "azimuth_std" in result:
+        sd = result.get("azimuth_std")
+        if isinstance(sd, (int, float)) and not math.isnan(float(sd)):
+            result["azimuth_var"] = float(sd) * float(sd)
+    if "elevation_std" in result:
+        sd = result.get("elevation_std")
+        if isinstance(sd, (int, float)) and not math.isnan(float(sd)):
+            result["elevation_var"] = float(sd) * float(sd)
     cat_scores = _category_scores_from_result(result)
     result["category_metrics_raw"] = cat_scores["raw"]
     result["category_metrics_zscore"] = cat_scores["z"]
@@ -301,10 +314,20 @@ DISPLAY_KEYS = [
     ("occlusion_mean",              "Occlusion Mean"),
     ("occlusion_var",               "Occlusion Var"),
     ("occlusion_complexity",        "Occlusion Complexity"),
+    ("occlusion_body_parts",        "Occ. Body Parts Mean"),
+    ("occlusion_carried_objects",   "Occ. Carried Obj Mean"),
+    ("occlusion_accessories",       "Occ. Accessories Mean"),
+    ("occlusion_environment",       "Occ. Environment Mean"),
+    ("occlusion_other_people",      "Occ. Other People Mean"),
+    ("occlusion_other",             "Occ. Other Mean"),
     # M3
     ("bg_entropy_mean",             "BG Entropy Mean"),
     ("bg_entropy_var",              "BG Entropy Var"),
     ("bg_object_density_mean",      "BG Object Density"),
+    ("bg_semantic_entropy_mean",    "BG Semantic Entropy Mean"),
+    ("bg_semantic_entropy_var",     "BG Semantic Entropy Var"),
+    ("bg_semantic_unique_mean",     "BG Semantic Unique Mean"),
+    ("bg_semantic_unique_var",      "BG Semantic Unique Var"),
     # M4
     ("luminance_mean_global",       "Luminance Mean"),
     ("luminance_var_global",        "Luminance Var"),
@@ -316,6 +339,7 @@ DISPLAY_KEYS = [
     # M6
     ("appearance_diversity_mean",   "Appearance Diversity Mean"),
     ("appearance_diversity_std",    "Appearance Diversity Std"),
+    ("appearance_diversity_var",    "Appearance Diversity Var"),
     # M7
     ("garment_diversity_logdet",    "Garment Diversity (log-det)"),
     ("garment_variance_total",      "Garment Variance Total"),
@@ -324,7 +348,10 @@ DISPLAY_KEYS = [
     ("vae_variance_total",          "VAE Variance Total"),
     # M9
     ("azimuth_std",                 "Camera Azimuth Std"),
+    ("azimuth_var",                 "Camera Azimuth Var"),
+    ("elevation_mean",              "Camera Elevation Mean"),
     ("elevation_std",               "Camera Elevation Std"),
+    ("elevation_var",               "Camera Elevation Var"),
     ("camera_diversity_score",      "Camera Diversity Score"),
 ]
 
