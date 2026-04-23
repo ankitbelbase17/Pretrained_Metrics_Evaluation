@@ -701,6 +701,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.batch_size < 16:
+        print(f"[Config] Requested batch_size={args.batch_size} is below minimum; using 16.")
+        args.batch_size = 16
     t_start = time.time()
     cache_info = configure_model_caches(args.download_base, set_home_for_hmr2=True)
     output_root = Path(args.output_dir)

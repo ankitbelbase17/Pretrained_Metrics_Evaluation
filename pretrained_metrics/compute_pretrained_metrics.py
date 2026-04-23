@@ -102,6 +102,9 @@ def evaluate_one_dataset(
     """
     device     = cfg.get("device", "cpu")
     batch_size = cfg.get("batch_size", 16)
+    if batch_size < 16:
+        print(f"  [Config] batch_size={batch_size} < 16; using 16.")
+        batch_size = 16
     num_workers= cfg.get("num_workers", 4)
     img_size   = tuple(cfg.get("img_size", [512, 384]))
     split      = cfg.get("split", "test")

@@ -35,6 +35,7 @@ import gc
 import os
 import subprocess as _sp
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -128,6 +129,7 @@ CURVTON_LINEWIDTHS = {
 
 # ── Batched feature-extraction constants ──────────────────────────────────────
 _EXTRACT_BATCH_SIZE = 32        # images per GPU batch
+_MIN_BATCH_SIZE     = 16        # hard lower bound (requested)
 _CHECKPOINT_EVERY   = 2000      # save intermediate .npz every N images
 _FEATURE_KEYS       = [
     "pose_vecs", "angles", "occlusion", "bg_entropy",
@@ -356,6 +358,29 @@ _METRIC_EXTRACTORS = [
     ("camera",       ["azimuths", "elevations", "camera_confidence"], _extract_camera),
 ]
 
+# Metric-specific multipliers for throughput tuning on large GPUs.
+# Effective values are clamped to >= _MIN_BATCH_SIZE.
+_METRIC_BATCH_MULTIPLIER = {
+    "pose": 1.0,
+    "occlusion": 1.0,
+    "background": 2.0,
+    "illumination": 2.0,
+    "body_shape": 1.0,
+    "appearance": 1.0,
+    "garment": 2.0,
+    "camera": 1.0,
+}
+
+
+def _effective_batch_size(batch_size: int) -> int:
+    return max(int(batch_size), _MIN_BATCH_SIZE)
+
+
+def _metric_batch_size(metric_name: str, base_batch_size: int) -> int:
+    base = _effective_batch_size(base_batch_size)
+    mult = float(_METRIC_BATCH_MULTIPLIER.get(metric_name, 1.0))
+    return max(_MIN_BATCH_SIZE, int(round(base * mult)))
+
 
 def extract_features_for_difficulty(
     loader: CURVTONDataloader,
@@ -369,6 +394,7 @@ def extract_features_for_difficulty(
     world_size: int = 1,
 ) -> Dict[str, np.ndarray]:
     """Extract EDA features, automatically sharding if world_size > 1."""
+    batch_size = _effective_batch_size(batch_size)
     if cache_path.exists() and not force_recompute:
         _print_rank0(f"  Loading cached features from {cache_path}", rank)
         if rank == 0:
@@ -394,10 +420,11 @@ def extract_features_for_difficulty(
     features: Dict[str, list] = {k: [] for k in _FEATURE_KEYS}
 
     for name, keys, extract_fn in _METRIC_EXTRACTORS:
+        metric_bs = _metric_batch_size(name, batch_size)
         metric_file = metric_cache_dir / f"{name}.npz"
         if metric_file.exists() and not force_recompute:
             if rank == 0:
-                print(f"    [{name}] Loading from rank {rank} metric cache...")
+                print(f"    [{name}] Loading from rank {rank} metric cache (batch={metric_bs})...")
             cached = dict(np.load(metric_file, allow_pickle=True))
             for k in keys:
                 if k in cached and cached[k].size > 0:
@@ -406,7 +433,8 @@ def extract_features_for_difficulty(
             continue
 
         try:
-            sub = extract_fn(loader, tf, device, batch_size, verbose=(rank==0),
+            t0 = time.perf_counter()
+            sub = extract_fn(loader, tf, device, metric_bs, verbose=(rank==0),
                              shard_rank=rank, shard_world_size=world_size, num_workers=num_workers)
             for k in keys:
                 features[k] = sub[k]
@@ -415,6 +443,11 @@ def extract_features_for_difficulty(
                 if sub[k]:
                     arrays[k] = (np.array(sub[k]) if np.isscalar(sub[k][0]) else np.stack(sub[k]))
             np.savez_compressed(metric_file, **arrays)
+            if rank == 0:
+                dt = time.perf_counter() - t0
+                n_out = max((len(sub.get(k, [])) for k in keys), default=0)
+                rate = (n_out / dt) if dt > 0 else 0.0
+                print(f"    [{name}] Done in {dt:.1f}s | samples={n_out} | batch={metric_bs} | {rate:.2f} img/s")
         except Exception as e:
             print(f"    [Rank {rank}] Warning: {name} extraction failed: {e}")
 
@@ -502,6 +535,7 @@ def run_curvton_eda(
     num_workers: int = 16,
 ):
     """Run full CURVTON EDA pipeline with native PyTorch distributed scaling."""
+    batch_size = _effective_batch_size(batch_size)
     rank, world, device = _setup_distributed()
 
     out_path = Path(out_dir)
@@ -517,6 +551,7 @@ def run_curvton_eda(
         print(f"  Output:       {out_dir}")
         print(f"  Device:       {device} (World Size: {world})")
         print(f"  Batch size:   {batch_size}")
+        print(f"  Min batch:    {_MIN_BATCH_SIZE}")
         print(f"  Sample ratio: {sample_ratio:.0%}")
         print(f"  Difficulties: {difficulties}")
         print("=" * 70)
