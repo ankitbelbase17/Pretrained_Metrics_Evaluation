@@ -28,7 +28,10 @@ MAX_BATCHES=2          # Quick smoke-test (2 batches = 32 images)
 BATCH_SIZE=16
 DEVICE="cuda"
 
-mkdir -p logs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
+cd "$SCRIPT_DIR"
 
 echo "============================================================"
 echo "  Per-Metric Smoke-Tests — $(date)"
@@ -47,7 +50,7 @@ run_test() {
     echo "──────────────────────────────────────────────────────────────"
     echo "  Running: ${label}"
     echo "──────────────────────────────────────────────────────────────"
-    python "${script}" \
+    python "$SCRIPT_DIR/${script}" \
         --device "${DEVICE}" \
         --curvton_root "${CURVTON_ROOT}" \
         --max_batches "${MAX_BATCHES}" \

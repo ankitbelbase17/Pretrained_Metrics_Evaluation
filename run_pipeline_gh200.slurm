@@ -8,16 +8,21 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=400G
 #SBATCH --time=02:00:00
-#SBATCH --output=/users/dbartaula/logs/pipeline_unified_%j.log
-#SBATCH --error=/users/dbartaula/logs/pipeline_unified_%j_error.log
+#SBATCH --output=logs/pipeline_unified_%j.log
+#SBATCH --error=logs/pipeline_unified_%j_error.log
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Unified Pipeline for CURVTON: Pretrained Metrics + EDA + Comparison
 # Hardware: 1 Node x 4 GH200 GPUs
 # ══════════════════════════════════════════════════════════════════════════════
 
-set -euo pipefail
-trap 'ec=$?; echo "[ERROR] Command failed (exit ${ec}) at line ${LINENO}: ${BASH_COMMAND}"; exit ${ec}' ERR
+set -uo pipefail
+
+# Ensure relative paths resolve inside this repository.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="$SCRIPT_DIR/logs"
+OUT_DIR="$SCRIPT_DIR/assets"
+mkdir -p "$LOG_DIR" "$OUT_DIR"
 
 
 # Disable tokenizers parallelism warning
@@ -27,8 +32,6 @@ export TOKENIZERS_PARALLELISM=false
 source /users/dbartaula/miniforge3/etc/profile.d/conda.sh
 conda activate torch26_env
 
-# Ensure relative paths resolve inside this repository.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 if [ ! -f "run.py" ]; then
@@ -53,11 +56,20 @@ echo "Python path: $(which python)"
 echo "================================================================="
 
 # Launch the unified Python orchestrator.
-# --gpus 4 tells run.py to automatically use torchrun for DataParallel processing
-# across the heavy deep learning models.
-srun python -u run.py --gpus $SLURM_GPUS_ON_NODE --output_dir "$SCRIPT_DIR/assets"
+# run.py now handles non-halting phase execution and prints consolidated reports at the end.
+echo "[INFO] Launching run.py with non-halting phase execution..."
+srun python -u "$SCRIPT_DIR/run.py" \
+    --gpus "$SLURM_GPUS_ON_NODE" \
+    --output_dir "$OUT_DIR"
+RUN_EXIT=$?
 
 echo "================================================================="
-echo "Pipeline Execution Completed Successfully!"
-echo "Outputs have been saved to your project directory (plots/ and JSONs)."
+if [ "$RUN_EXIT" -eq 0 ]; then
+    echo "Pipeline execution completed successfully."
+else
+    echo "Pipeline execution finished with failures (exit code: $RUN_EXIT)."
+    echo "run.py still completed all phases/checks and printed final consolidated report."
+fi
+echo "Outputs directory: $OUT_DIR"
 echo "================================================================="
+exit "$RUN_EXIT"

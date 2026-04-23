@@ -13,7 +13,8 @@
 # Configuration
 # -----------------------------------------------------------------------------
 BASE_PATH="/path/to/dataset"         # <-- CHANGE THIS TO YOUR DATASET PATH
-OUT_DIR="metrics_output/curvton"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUT_DIR="$SCRIPT_DIR/assets/metrics/curvton"
 
 # Load modules (modify according to your HPC environment)
 # module load python/3.10
@@ -23,7 +24,8 @@ OUT_DIR="metrics_output/curvton"
 # source /path/to/your/venv/bin/activate
 
 # Create log directory just in case it doesn't exist
-mkdir -p logs
+mkdir -p "$SCRIPT_DIR/logs" "$OUT_DIR"
+cd "$SCRIPT_DIR"
 
 echo "Starting CURVTON metrics evaluation on multi-GH200"
 echo "Date: $(date)"
@@ -39,7 +41,7 @@ echo "Starting multi-GPU computation using torchrun..."
 echo "Computing metrics for ratios: 10%, 20%, 30%, 40%, 100%"
 
 srun torchrun --nproc_per_node=$SLURM_GPUS_ON_NODE \
-    pretrained_metrics/compute_curvton_metrics.py \
+    "$SCRIPT_DIR/pretrained_metrics/compute_curvton_metrics.py" \
     --base_path "$BASE_PATH" \
     --out_dir "$OUT_DIR" \
     --difficulties easy medium hard \
