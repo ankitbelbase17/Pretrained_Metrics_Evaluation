@@ -217,6 +217,7 @@ def compute_metrics_for_split(
     verbose: bool = True,
     only_metrics: List[str] | None = None,
     existing_results: Dict[str, float] | None = None,
+    appearance_kwargs: Dict[str, object] | None = None,
 ) -> Dict[str, float]:
     """Compute metrics for one split, saving each metric incrementally.
 
@@ -260,6 +261,8 @@ def compute_metrics_for_split(
         if only_metrics is not None and label not in only_metrics:
             continue
         kwargs = {"device": device} if needs_device else {}
+        if label == "appearance" and appearance_kwargs:
+            kwargs.update(appearance_kwargs)
         metric_specs.append((label, cls, kwargs, use_cloth))
 
     results: Dict[str, float] = dict(existing_results or {})
@@ -322,6 +325,11 @@ def compute_curvton_metrics(
     batch_size: int = 40,
     num_workers: int = 16,
     seed: int = 42,
+    m6_face_detector_backend: str = "auto",
+    m6_retinaface_repo_dir: str | None = None,
+    m6_retinaface_weights: str | None = None,
+    m6_retinaface_backbone: str = "mobilenetv1_0.25",
+    m6_retinaface_device: str = "cpu",
 ) -> Dict[str, Dict]:
     """Compute pretrained metrics for CURVTON dataset with multi-GPU support."""
 
@@ -344,6 +352,13 @@ def compute_curvton_metrics(
     all_results = {}
     sample_counts = {}
     _loaders: Dict[str, CURVTONDataloader] = {}
+    appearance_kwargs = {
+        "face_detector_backend": m6_face_detector_backend,
+        "retinaface_repo_dir": m6_retinaface_repo_dir,
+        "retinaface_weights": m6_retinaface_weights,
+        "retinaface_backbone": m6_retinaface_backbone,
+        "retinaface_device": m6_retinaface_device,
+    }
 
     # Build loaders once for reuse in both phases
     for diff in difficulties:
@@ -398,6 +413,7 @@ def compute_curvton_metrics(
             out_dir=out_dir,
             only_metrics=["appearance"],
             existing_results=all_results[diff],
+            appearance_kwargs=appearance_kwargs,
         )
         all_results[diff] = metrics
 
@@ -507,6 +523,11 @@ def compute_multi_ratio_metrics(
     ratios: List[float] = None,
     batch_size: int = 40,
     num_workers: int = 16,
+    m6_face_detector_backend: str = "auto",
+    m6_retinaface_repo_dir: str | None = None,
+    m6_retinaface_weights: str | None = None,
+    m6_retinaface_backbone: str = "mobilenetv1_0.25",
+    m6_retinaface_device: str = "cpu",
 ) -> Dict[str, Dict]:
     if ratios is None:
         ratios = [0.1, 0.2, 0.3, 0.4, 1.0]
@@ -527,6 +548,11 @@ def compute_multi_ratio_metrics(
             sample_ratio=ratio,
             batch_size=batch_size,
             num_workers=num_workers,
+            m6_face_detector_backend=m6_face_detector_backend,
+            m6_retinaface_repo_dir=m6_retinaface_repo_dir,
+            m6_retinaface_weights=m6_retinaface_weights,
+            m6_retinaface_backbone=m6_retinaface_backbone,
+            m6_retinaface_device=m6_retinaface_device,
         )
         all_ratio_results[f"{ratio_pct}%"] = results
 
@@ -568,6 +594,17 @@ if __name__ == "__main__":
                         help="Batch size per GPU")
     parser.add_argument("--num_workers", type=int, default=16,
                         help="DataLoader workers per GPU")
+    parser.add_argument("--m6_face_detector_backend", type=str, default="auto",
+                        choices=["auto", "retinaface_pytorch", "insightface", "haar"],
+                        help="Face detector backend for M6 appearance metric.")
+    parser.add_argument("--m6_retinaface_repo_dir", type=str, default=None,
+                        help="Path to cloned yakhyo/retinaface-pytorch repo.")
+    parser.add_argument("--m6_retinaface_weights", type=str, default=None,
+                        help="Path to RetinaFace .pth weights file.")
+    parser.add_argument("--m6_retinaface_backbone", type=str, default="mobilenetv1_0.25",
+                        help="RetinaFace backbone/network name.")
+    parser.add_argument("--m6_retinaface_device", type=str, default="cpu",
+                        help="Device for RetinaFace detector (cpu or cuda).")
 
     args = parser.parse_args()
 
@@ -578,6 +615,11 @@ if __name__ == "__main__":
             ratios=args.ratios,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
+            m6_face_detector_backend=args.m6_face_detector_backend,
+            m6_retinaface_repo_dir=args.m6_retinaface_repo_dir,
+            m6_retinaface_weights=args.m6_retinaface_weights,
+            m6_retinaface_backbone=args.m6_retinaface_backbone,
+            m6_retinaface_device=args.m6_retinaface_device,
         )
     else:
         compute_curvton_metrics(
@@ -587,4 +629,9 @@ if __name__ == "__main__":
             difficulties=args.difficulties,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
+            m6_face_detector_backend=args.m6_face_detector_backend,
+            m6_retinaface_repo_dir=args.m6_retinaface_repo_dir,
+            m6_retinaface_weights=args.m6_retinaface_weights,
+            m6_retinaface_backbone=args.m6_retinaface_backbone,
+            m6_retinaface_device=args.m6_retinaface_device,
         )

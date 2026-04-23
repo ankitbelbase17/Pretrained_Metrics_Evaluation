@@ -167,6 +167,11 @@ def evaluate_one_dataset(
     run_garment = cfg.get("run_garment", True)
     run_vae     = cfg.get("run_vae", True)
     run_camera  = cfg.get("run_camera", True)
+    m6_face_detector_backend = cfg.get("m6_face_detector_backend", "auto")
+    m6_retinaface_repo_dir = cfg.get("m6_retinaface_repo_dir", None)
+    m6_retinaface_weights = cfg.get("m6_retinaface_weights", None)
+    m6_retinaface_backbone = cfg.get("m6_retinaface_backbone", "mobilenetv1_0.25")
+    m6_retinaface_device = cfg.get("m6_retinaface_device", "cpu")
 
     # Resolve root if not provided
     if not root and config:
@@ -239,7 +244,14 @@ def evaluate_one_dataset(
     if m4: _loaded("M4 Illumination")
     m5 = BodyShapeMetrics(device=device)      if run_shape   else None
     if m5: _loaded("M5 BodyShape")
-    m6 = AppearanceMetrics(device=device)     if run_appear  else None
+    m6 = AppearanceMetrics(
+        device=device,
+        face_detector_backend=m6_face_detector_backend,
+        retinaface_repo_dir=m6_retinaface_repo_dir,
+        retinaface_weights=m6_retinaface_weights,
+        retinaface_backbone=m6_retinaface_backbone,
+        retinaface_device=m6_retinaface_device,
+    ) if run_appear else None
     if m6: _loaded("M6 Appearance")
     m7 = GarmentTextureMetrics(device=device) if run_garment else None
     if m7: _loaded("M7 GarmentTexture")
@@ -600,6 +612,17 @@ def _parse():
     p.add_argument("--no_camera",  action="store_true")
     p.add_argument("--force_appear", action="store_true",
                    help="Force-enable appearance metric for all datasets/config entries.")
+    p.add_argument("--m6_face_detector_backend", type=str, default="auto",
+                   choices=["auto", "retinaface_pytorch", "insightface", "haar"],
+                   help="Face detector backend for M6 appearance metric.")
+    p.add_argument("--m6_retinaface_repo_dir", type=str, default=None,
+                   help="Path to cloned yakhyo/retinaface-pytorch repo.")
+    p.add_argument("--m6_retinaface_weights", type=str, default=None,
+                   help="Path to RetinaFace .pth weights (e.g., retinaface_mv1_0.25.pth).")
+    p.add_argument("--m6_retinaface_backbone", type=str, default="mobilenetv1_0.25",
+                   help="RetinaFace backbone name used by yakhyo repo.")
+    p.add_argument("--m6_retinaface_device", type=str, default="cpu",
+                   help="Device for RetinaFace detector (cpu or cuda).")
     return p.parse_args()
 
 
@@ -627,6 +650,11 @@ def main():
         run_garment= not args.no_garment,
         run_vae=     not args.no_vae,
         run_camera=  not args.no_camera,
+        m6_face_detector_backend=args.m6_face_detector_backend,
+        m6_retinaface_repo_dir=args.m6_retinaface_repo_dir,
+        m6_retinaface_weights=args.m6_retinaface_weights,
+        m6_retinaface_backbone=args.m6_retinaface_backbone,
+        m6_retinaface_device=args.m6_retinaface_device,
     )
     if args.force_appear:
         base_cfg["run_appear"] = True

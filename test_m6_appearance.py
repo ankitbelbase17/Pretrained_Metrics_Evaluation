@@ -1,5 +1,5 @@
 """
-test_appearance.py
+test_m6_appearance.py
 ==================
 Standalone smoke-test for the M6 Appearance (face-embedding diversity) metric.
 
@@ -13,13 +13,13 @@ What this script does:
 Usage
 -----
 # Quick smoke-test (2 batches)
-python test_appearance.py --max_batches 2
+python test_m6_appearance.py --max_batches 2
 
 # Full split
-python test_appearance.py --max_batches 0
+python test_m6_appearance.py --max_batches 0
 
 # CPU-only
-python test_appearance.py --device cpu --max_batches 4
+python test_m6_appearance.py --device cpu --max_batches 4
 """
 
 from __future__ import annotations

@@ -67,7 +67,7 @@ run_test "M2 Occlusion (Mask2Former/SegFormer)"        test_m2_occlusion.py
 run_test "M3 Background (DeepLabV3 + DETR)"            test_m3_background.py
 run_test "M4 Illumination (signal processing)"         test_m4_illumination.py
 run_test "M5 Body Shape (HMR2.0 / ViT)"               test_m5_body_shape.py
-run_test "M6 Appearance (ArcFace / open_clip)"         test_appearance.py
+run_test "M6 Appearance (ArcFace / open_clip)"         test_m6_appearance.py
 run_test "M7 Garment Texture (open_clip / ViT)"        test_m7_garment_texture.py
 run_test "M8 VAE Latent (SD VAE)"                      test_m8_vae_latent.py
 run_test "M9 Camera Angle (HMR2.0 / KeypointRCNN)"    test_m9_camera_angle.py
