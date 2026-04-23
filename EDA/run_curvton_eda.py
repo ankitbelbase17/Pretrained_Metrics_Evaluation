@@ -639,13 +639,8 @@ def run_curvton_eda(
         plot_shape_pca(beta_data, str(out_path / "body_shape"))
         plot_shape_coefficient_histograms(beta_data, str(out_path / "body_shape"))
     
-    # --- 6. Appearance EDA ---
-    print("\n[6/7] Appearance Diversity...")
-    face_data = {k: v["face_embs"] for k, v in all_features.items() if len(v.get("face_embs", [])) > 0}
-    
-    if face_data:
-        plot_face_umap(face_data, str(out_path / "appearance"))
-        plot_pairwise_distance_distribution(face_data, str(out_path / "appearance"))
+    # --- 6. Appearance EDA (globally disabled) ---
+    print("\n[6/8] Appearance Diversity... disabled (face-associated EDA plots removed)")
     
     # --- 7. Garment EDA ---
     print("\n[7/8] Garment Diversity...")

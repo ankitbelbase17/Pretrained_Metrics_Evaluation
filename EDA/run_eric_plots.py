@@ -95,14 +95,8 @@ def _run_eric_6(
     else:
         print("\n  [1/6] ⚠ Skipped — no garment_embs in cache")
 
-    # ── 2. Face Embeddings t-SNE (Appearance Diversity) ───────────────────
-    face = {n: d["face_embs"] for n, d in all_data.items()
-            if "face_embs" in d and len(d.get("face_embs", [])) > 0}
-    if face:
-        print("  [2/6] Face Embeddings (t-SNE appearance diversity) …")
-        plot_face_umap(face, out_dir=str(P))
-    else:
-        print("  [2/6] ⚠ Skipped — no face_embs in cache")
+    # ── 2. Face Embeddings (Appearance) ───────────────────────────────────
+    print("  [2/6] Appearance face plots disabled (removed globally)")
 
     # ── 3. Body Shape Diversity (PCA β with 1σ ellipses) ──────────────────
     betas = {n: d["betas"] for n, d in all_data.items()

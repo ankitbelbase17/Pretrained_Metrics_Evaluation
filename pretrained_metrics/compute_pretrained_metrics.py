@@ -332,6 +332,8 @@ def evaluate_one_dataset(
 DISPLAY_KEYS = [
     # M1
     ("pose_diversity",              "Pose Diversity (log-det)"),
+    ("pose_diversity_logdet_raw",   "Pose Diversity logdet raw"),
+    ("pose_diversity_logdet_normalized", "Pose Diversity logdet norm"),
     ("pose_artic_complexity",       "Pose Artic. Complexity"),
     ("pose_artic_mean_per_image",   "Pose Artic. Mean/img"),
     # M2
@@ -359,16 +361,28 @@ DISPLAY_KEYS = [
     ("illumination_complexity",     "Illum. Complexity"),
     # M5
     ("shape_diversity_logdet",      "Shape Diversity (log-det)"),
+    ("shape_diversity_logdet_raw",  "Shape Diversity logdet raw"),
+    ("shape_diversity_logdet_normalized", "Shape Diversity logdet norm"),
     ("shape_variance_total",        "Shape Variance Total"),
     # M6
     ("appearance_diversity_mean",   "Appearance Diversity Mean"),
     ("appearance_diversity_std",    "Appearance Diversity Std"),
     ("appearance_diversity_var",    "Appearance Diversity Var"),
+    ("appearance_diversity_logdet_raw", "Appearance logdet raw"),
+    ("appearance_diversity_logdet_normalized", "Appearance logdet norm"),
     # M7
     ("garment_diversity_logdet",    "Garment Diversity (log-det)"),
+    ("garment_diversity_logdet_raw", "Garment Diversity logdet raw"),
+    ("garment_diversity_logdet_normalized", "Garment Diversity logdet norm"),
+    ("garment_diversity_neg_logdet_raw", "Garment Diversity neg-logdet raw"),
+    ("garment_diversity_neg_logdet_normalized", "Garment Diversity neg-logdet norm"),
     ("garment_variance_total",      "Garment Variance Total"),
     # M8
     ("vae_diversity_logdet",        "VAE Diversity (log-det)"),
+    ("vae_diversity_logdet_raw",    "VAE Diversity logdet raw"),
+    ("vae_diversity_logdet_normalized", "VAE Diversity logdet norm"),
+    ("vae_diversity_neg_logdet_raw", "VAE Diversity neg-logdet raw"),
+    ("vae_diversity_neg_logdet_normalized", "VAE Diversity neg-logdet norm"),
     ("vae_variance_total",          "VAE Variance Total"),
     # M9
     ("azimuth_std",                 "Camera Azimuth Std"),

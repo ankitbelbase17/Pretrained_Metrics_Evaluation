@@ -154,17 +154,8 @@ def run_all_plots(
             out_dir=str(P / "body_shape"),
         )
 
-    # ── P6: Appearance ───────────────────────────────────────────────────
-    if "p6" not in skip:
-        print("\n  [P6] Appearance …")
-        plot_face_umap(
-            {n: d["face_embs"] for n, d in all_data.items()},
-            out_dir=str(P / "appearance"),
-        )
-        plot_pairwise_distance_distribution(
-            {n: d["face_embs"] for n, d in all_data.items()},
-            out_dir=str(P / "appearance"),
-        )
+    # ── P6: Appearance (globally disabled) ───────────────────────────────
+    print("\n  [P6] Appearance … disabled (face-associated EDA plots removed)")
 
     # ── P7: Garment ──────────────────────────────────────────────────────
     if "p7" not in skip:

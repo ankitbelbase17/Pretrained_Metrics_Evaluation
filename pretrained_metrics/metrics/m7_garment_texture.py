@@ -215,9 +215,19 @@ class GarmentTextureMetrics:
 
         out = dict(weighted)
         out["garment_diversity_neg_logdet_raw"] = weighted.get("garment_diversity_neg_logdet", float("nan"))
+        out["garment_diversity_logdet_raw"] = (
+            -out["garment_diversity_neg_logdet_raw"]
+            if not np.isnan(out["garment_diversity_neg_logdet_raw"])
+            else float("nan")
+        )
         out["garment_diversity_logdet"] = (
             -weighted["garment_diversity_neg_logdet"]
             if not np.isnan(weighted["garment_diversity_neg_logdet"])
+            else float("nan")
+        )
+        out["garment_diversity_logdet_normalized"] = (
+            -weighted["garment_diversity_neg_logdet_normalized"]
+            if not np.isnan(weighted["garment_diversity_neg_logdet_normalized"])
             else float("nan")
         )
 
