@@ -13,7 +13,7 @@ Metric 1 — Pose Diversity & Pose Articulation Complexity
 
 Pretrained model
 -----------------
-MMPose HRNet (COCO 17 joints), via `MMPoseInferencer`.
+Keypoint R-CNN (torchvision), COCO-17 keypoints.
 
 Input
 ------
@@ -73,36 +73,31 @@ IDX_R_HIP      = J2I["right_hip"]
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _KeypointExtractor:
-    """COCO-17 keypoint extractor using MMPose HRNet."""
+    """COCO-17 keypoint extractor using torchvision KeypointRCNN."""
 
     INPUT_SIZE = (256, 192)   # H×W for most top-down pose models
 
     def __init__(self, device: str = "cpu"):
         self.device = device
-        self._backend: str = "stub"
-        self._inferencer = None
+        self._krcnn = None
         self._load()
 
     # --------------------------------------------------------------------- #
     def _load(self):
-        # Use a proper pose estimator (HRNet) rather than a generic CNN backbone.
         try:
-            from mmpose.apis import MMPoseInferencer
+            import torchvision
 
-            self._inferencer = MMPoseInferencer(
-                pose2d="td-hm_hrnet-w32_8xb64-210e_coco-256x192",
-                det_model="human",
-                det_cat_ids=[0],
-                device=self.device,
+            weights = torchvision.models.detection.KeypointRCNN_ResNet50_FPN_Weights.DEFAULT
+            self._krcnn = torchvision.models.detection.keypointrcnn_resnet50_fpn(
+                weights=weights
             )
-            self._backend = "mmpose_hrnet"
-            print("[PoseMetric] Using MMPose HRNet-W32 for keypoint extraction.")
-            return
-        except Exception as e:
+            self._krcnn = self._krcnn.to(self.device).eval()
+            print("[PoseMetric] Using KeypointRCNN for keypoint extraction.")
+        except Exception as e2:
             raise RuntimeError(
-                "[PoseMetric] MMPose HRNet backend is required but unavailable. "
-                "Install mmpose and its dependencies (mmengine/mmcv/mmdet) and ensure weights can be downloaded."
-            ) from e
+                "[PoseMetric] KeypointRCNN backend unavailable. "
+                "Ensure torchvision detection/keypoint dependencies are installed."
+            ) from e2
 
     # --------------------------------------------------------------------- #
     @torch.no_grad()
@@ -111,58 +106,21 @@ class _KeypointExtractor:
         imgs : (B, 3, H, W)  float32  [0,1]
         Returns : (B, 17, 2) numpy array of (x, y) pixel coordinates
         """
-        if self._backend == "mmpose_hrnet":
-            all_kps: List[np.ndarray] = []
-
-            for im in imgs:
-                # CHW float [0,1] -> HWC uint8 RGB for inferencer input.
-                np_img = (
-                    im.detach()
-                    .clamp(0, 1)
-                    .mul(255)
-                    .byte()
-                    .permute(1, 2, 0)
-                    .cpu()
-                    .numpy()
-                )
-
-                result = next(self._inferencer(np_img, return_vis=False))
-                preds = result.get("predictions", [])
-
-                # MMPose output can be either [instances] or [[instances]].
-                if preds and isinstance(preds[0], list):
-                    instances = preds[0]
-                else:
-                    instances = preds
-
-                if not instances:
-                    all_kps.append(np.zeros((17, 2), dtype=np.float32))
-                    continue
-
-                def _inst_score(inst: dict) -> float:
-                    k_scores = inst.get("keypoint_scores")
-                    if k_scores is not None:
-                        arr = np.asarray(k_scores, dtype=np.float32).reshape(-1)
-                        if arr.size:
-                            return float(np.mean(arr))
-                    b_score = inst.get("bbox_score")
-                    return float(b_score) if b_score is not None else 0.0
-
-                best_inst = max(instances, key=_inst_score)
-                kps = np.asarray(best_inst.get("keypoints", []), dtype=np.float32)
-                if kps.ndim == 3:
-                    kps = kps[0]
-
-                if kps.shape != (17, 2):
-                    raise RuntimeError(
-                        f"[PoseMetric] HRNet predicted invalid keypoint shape: {kps.shape}"
-                    )
-
-                all_kps.append(kps)
-
-            return np.stack(all_kps, axis=0)
-
-        raise RuntimeError("[PoseMetric] No valid pose backend available.")
+        dets = self._krcnn([im.to(self.device) for im in imgs])
+        all_kps: List[np.ndarray] = []
+        for det in dets:
+            kps = det.get("keypoints")
+            scores = det.get("scores")
+            if kps is None or kps.numel() == 0:
+                all_kps.append(np.zeros((17, 2), dtype=np.float32))
+                continue
+            best = int(torch.argmax(scores).item()) if scores is not None and scores.numel() else 0
+            kp = kps[best, :, :2].detach().cpu().numpy().astype(np.float32)
+            if kp.shape != (17, 2):
+                all_kps.append(np.zeros((17, 2), dtype=np.float32))
+            else:
+                all_kps.append(kp)
+        return np.stack(all_kps, axis=0)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Normalise pose
@@ -264,10 +222,18 @@ class PoseMetrics:
     # ------------------------------------------------------------------ #
     def compute(self) -> Dict[str, float]:
         """
-        Returns dict:
-            pose_diversity        : log det(Cov + ε·I)
-            pose_artic_complexity : Σ Var(θ_limb)
-            pose_artic_mean_per_image : mean per-image angle std
+          Returns dict with formulas:
+
+             1) Pose Diversity
+                 D_pose = log det( Cov(v) + eps * I )
+                 where v in R^34 is flattened normalized keypoints.
+
+             2) Pose Articulation Complexity
+                 C_artic = sum_limb Var(theta_limb)
+                 where theta_limb is the joint angle at each predefined triplet.
+
+             3) Mean per-image articulation
+                 mean_i std_j(theta_{i,j}) over valid angles in each image.
         """
         if len(self._pose_vecs) < 2:
             return {
