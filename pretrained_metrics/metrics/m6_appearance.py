@@ -87,7 +87,7 @@ class ParametricFaceMetric:
         imgs_np = (person_imgs.permute(0, 2, 3, 1).cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
 
         for i in range(B):
-            img = imgs_np[i]
+            img = np.ascontiguousarray(imgs_np[i])
             mp_img = self._mp_image(image_format=self._mp_format, data=img)
             try:
                 res = self._detector.detect(mp_img)
