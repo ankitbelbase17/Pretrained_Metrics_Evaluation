@@ -24,7 +24,7 @@
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 CURVTON_ROOT="/iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/hard"
-MAX_BATCHES=2          # Quick smoke-test (2 batches = 32 images)
+MAX_BATCHES=0          # 0 = use all batches (all images in each dataset)
 BATCH_SIZE=16
 DEVICE="cuda"
 

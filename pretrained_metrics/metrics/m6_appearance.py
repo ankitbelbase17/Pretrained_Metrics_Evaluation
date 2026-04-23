@@ -384,7 +384,6 @@ class ParametricFaceMetric:
 
                 if getattr(res, "facial_transformation_matrixes", None):
                     t_matrix = res.facial_transformation_matrixes[0].flatten().astype(np.float32)
-                    t_matrix = t_matrix / (np.linalg.norm(t_matrix) + 1e-6)
                 else:
                     t_matrix = np.zeros(16, dtype=np.float32)
 
@@ -431,9 +430,11 @@ class ParametricFaceMetric:
             sig = eigvals[:erank] + 1e-6
             log_det = float(np.sum(np.log(sig)))
             cov_norm = -log_det / erank
+            log_det_norm = log_det / erank
         else:
             log_det = float("nan")
             cov_norm = float("nan")
+            log_det_norm = float("nan")
 
         # Pairwise cosine distance over parametric embeddings.
         en = e / (np.linalg.norm(e, axis=1, keepdims=True) + 1e-8)
@@ -448,6 +449,8 @@ class ParametricFaceMetric:
             "appearance_diversity_std": std_div,
             "appearance_diversity_cov_norm": cov_norm,
             "appearance_diversity_logdet": log_det,
+            "appearance_diversity_logdet_raw": log_det,
+            "appearance_diversity_logdet_normalized": log_det_norm,
             "n_faces": n,
         }
 

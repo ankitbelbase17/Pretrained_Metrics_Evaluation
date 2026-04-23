@@ -205,7 +205,8 @@ class PoseMetrics:
             pn = kps_norm[i]   # (17, 2)
 
             # ── Pose vector ─────────────────────────────────────────────
-            self._pose_vecs.append(pn.flatten())   # (34,)
+            # Use raw keypoints for log-det diversity (no pre-normalisation).
+            self._pose_vecs.append(kps_raw[i].flatten())   # (34,)
 
             # ── Joint angles ─────────────────────────────────────────────
             img_angles = []
@@ -253,6 +254,7 @@ class PoseMetrics:
         reg = cov + self.eps * np.eye(D)
         sign, log_det = np.linalg.slogdet(reg)
         d_pose = float(log_det) if sign > 0 else float("nan")
+        d_pose_norm = (d_pose / D) if (not math.isnan(d_pose) and D > 0) else float("nan")
 
         # 1B — Complexity (Absolute magnitude per sample, NOT dataset variance)
         c_artic = 0.0
@@ -271,6 +273,8 @@ class PoseMetrics:
 
         return {
             "pose_diversity":            d_pose,
+            "pose_diversity_logdet_raw": d_pose,
+            "pose_diversity_logdet_normalized": d_pose_norm,
             "pose_artic_complexity":     c_artic,
             "pose_artic_mean_per_image": float(np.mean(artic_per_image)) if artic_per_image else float("nan"),
         }

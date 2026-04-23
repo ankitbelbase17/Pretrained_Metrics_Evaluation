@@ -218,10 +218,13 @@ class BodyShapeMetrics:
 
         sign, log_det = np.linalg.slogdet(reg)
         d_shape   = float(log_det) if sign > 0 else float("nan")
+        d_shape_norm = (d_shape / 10.0) if (not np.isnan(d_shape)) else float("nan")
         total_var = float(np.linalg.eigvalsh(reg).sum())
 
         return {
             "shape_diversity_logdet": d_shape,
+            "shape_diversity_logdet_raw": d_shape,
+            "shape_diversity_logdet_normalized": d_shape_norm,
             "shape_variance_total":   total_var,
             "shape_dims":             float(self._extractor.SHAPE_DIM),
             "backend":                self._extractor._backend,

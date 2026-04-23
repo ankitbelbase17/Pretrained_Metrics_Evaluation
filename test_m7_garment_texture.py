@@ -14,7 +14,7 @@ def _probe_m7(device: str, batches: List[Dict[str, torch.Tensor]], _args) -> Tup
     from pretrained_metrics.metrics.m7_garment_texture import GarmentTextureMetrics
 
     obj = GarmentTextureMetrics(device=device)
-    backend = getattr(obj._encoder, "_backend", "unknown")
+    backend = ",".join(sorted(getattr(obj._encoder, "_models", {}).keys())) or "unknown"
     t0 = time.time()
     for batch in batches:
         obj.update(batch["cloth"])
@@ -30,8 +30,8 @@ def main() -> int:
         args=args,
         metric_title="M7 Garment Texture",
         probe_fn=_probe_m7,
-        paper_score_key="garment_diversity_neg_logdet_normalized",
-        paper_score_label="Garment Texture Diversity (normalized neg-logdet)",
+        paper_score_key="garment_ensemble_score_0_1",
+        paper_score_label="Garment Texture Ultimate Ensemble Score (0-1)",
         set_home_for_hmr2=False,
     )
 

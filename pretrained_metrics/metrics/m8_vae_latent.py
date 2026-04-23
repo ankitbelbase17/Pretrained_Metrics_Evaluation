@@ -197,6 +197,10 @@ class VAELatentMetric:
         """
         if not self._embeddings:
             return {
+                "vae_diversity_logdet":          0.0,
+                "vae_diversity_logdet_raw":      0.0,
+                "vae_diversity_logdet_normalized": 0.0,
+                "vae_diversity_neg_logdet_raw":      0.0,
                 "vae_diversity_neg_logdet":      0.0,
                 "vae_diversity_neg_logdet_normalized":  0.0,
                 "vae_variance_total":        0.0,
@@ -237,6 +241,10 @@ class VAELatentMetric:
 
         if effective_rank == 0:
             return {
+                "vae_diversity_logdet":          float("-inf"),
+                "vae_diversity_logdet_raw":      float("-inf"),
+                "vae_diversity_logdet_normalized": float("-inf"),
+                "vae_diversity_neg_logdet_raw":      float("inf"),
                 "vae_diversity_neg_logdet":      float("inf"),
                 "vae_diversity_neg_logdet_normalized":  float("inf"),
                 "vae_variance_total":        total_var,
@@ -253,8 +261,14 @@ class VAELatentMetric:
 
         # Normalised negative log-det (per effective dimension)
         neg_log_det_norm = neg_log_det / effective_rank
+        log_det = -neg_log_det
+        log_det_norm = -neg_log_det_norm
 
         return {
+            "vae_diversity_logdet":          log_det,
+            "vae_diversity_logdet_raw":      log_det,
+            "vae_diversity_logdet_normalized": log_det_norm,
+            "vae_diversity_neg_logdet_raw":      neg_log_det,
             "vae_diversity_neg_logdet":      neg_log_det,
             "vae_diversity_neg_logdet_normalized":  neg_log_det_norm,
             "vae_variance_total":        total_var,

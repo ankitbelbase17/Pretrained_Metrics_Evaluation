@@ -41,9 +41,18 @@ def add_common_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--img_size", type=int, nargs=2, default=[512, 384])
-    p.add_argument("--max_batches", type=int, default=2)
-    p.add_argument("--include_curvton_hard", action="store_true",
-                   help="Include curvton hard split entries from YAML.")
+    p.add_argument(
+        "--max_batches",
+        type=int,
+        default=0,
+        help="Number of batches per dataset (0 = all batches, default).",
+    )
+    p.add_argument(
+        "--include_curvton_hard",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include curvton hard split entries from YAML (default: enabled).",
+    )
     p.add_argument(
         "--continue_on_error",
         action=argparse.BooleanOptionalAction,
@@ -167,9 +176,15 @@ def run_metric_on_all_datasets(
     n_fail = 0
     paper_scores: List[float] = []
 
+    seen_targets = set()
     for cfg in entries:
         targets = _expand_loader_targets(cfg)
         for dataset_name, root, split, category in targets:
+            target_key = (dataset_name, root, split, category or "-")
+            if target_key in seen_targets:
+                continue
+            seen_targets.add(target_key)
+
             label = f"{dataset_name} | split={split}"
             if category:
                 label += f" | category={category}"
@@ -184,6 +199,7 @@ def run_metric_on_all_datasets(
                 results.append(
                     {
                         "dataset": dataset_name,
+                        "root": root,
                         "split": split,
                         "category": category or "-",
                         "status": "PASS",
@@ -211,6 +227,7 @@ def run_metric_on_all_datasets(
                 results.append(
                     {
                         "dataset": dataset_name,
+                        "root": root,
                         "split": split,
                         "category": category or "-",
                         "status": "FAIL",
@@ -231,10 +248,11 @@ def run_metric_on_all_datasets(
             break
 
     score_col = f"PrimaryScore ({paper_score_key})"
-    headers = ["Dataset", "Split", "Category", "Status", "Backend", "Images", "Time", score_col, "Error"]
+    headers = ["Dataset", "Root", "Split", "Category", "Status", "Backend", "Images", "Time", score_col, "Error"]
     rows = [
         [
             r["dataset"],
+            r["root"],
             r["split"],
             r["category"],
             r["status"],
