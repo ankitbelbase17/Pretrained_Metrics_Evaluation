@@ -215,12 +215,6 @@ class GarmentTextureMetrics:
 
         out = dict(weighted)
         out["garment_diversity_logdet_raw"] = weighted.get("garment_diversity_logdet", float("nan"))
-        out["garment_diversity_neg_logdet"] = out.get("garment_diversity_logdet", float("nan"))
-        out["garment_diversity_neg_logdet_raw"] = out.get("garment_diversity_logdet_raw", float("nan"))
-        out["garment_diversity_neg_logdet_normalized"] = out.get(
-            "garment_diversity_logdet_normalized",
-            float("nan"),
-        )
 
         def _norm_score_from_logdet(v: float) -> float:
             # Higher normalized log-det indicates larger spread/diversity.
@@ -233,11 +227,6 @@ class GarmentTextureMetrics:
             out[f"garment_{backend}_diversity_logdet"] = stats["garment_diversity_logdet"]
             out[f"garment_{backend}_diversity_logdet_normalized"] = stats[
                 "garment_diversity_logdet_normalized"
-            ]
-            out[f"garment_{backend}_diversity_neg_logdet_raw"] = out[f"garment_{backend}_diversity_logdet_raw"]
-            out[f"garment_{backend}_diversity_neg_logdet"] = out[f"garment_{backend}_diversity_logdet"]
-            out[f"garment_{backend}_diversity_neg_logdet_normalized"] = out[
-                f"garment_{backend}_diversity_logdet_normalized"
             ]
             out[f"garment_{backend}_score_0_1"] = _norm_score_from_logdet(
                 stats["garment_diversity_logdet_normalized"]
