@@ -30,8 +30,8 @@ def main() -> int:
         args=args,
         metric_title="M7 Garment Texture",
         probe_fn=_probe_m7,
-        paper_score_key="garment_diversity_logdet",
-        paper_score_label="Garment Texture Diversity (logdet)",
+        paper_score_key="garment_diversity_neg_logdet_normalized",
+        paper_score_label="Garment Texture Diversity (normalized neg-logdet)",
         set_home_for_hmr2=False,
     )
 

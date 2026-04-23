@@ -124,6 +124,12 @@ class _GarmentEncoder:
         pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in imgs]
         inputs = self._hf_processor(images=pils, return_tensors="pt").to(self.device)
         emb = self._hf_model.get_image_features(**inputs)
+        # Some FashionCLIP checkpoints/wrappers can return a model output object
+        # instead of a raw tensor; handle both safely.
+        if hasattr(emb, "pooler_output"):
+            emb = emb.pooler_output
+        elif hasattr(emb, "last_hidden_state"):
+            emb = emb.last_hidden_state[:, 0]
         emb = F.normalize(emb.float(), dim=-1)
         return emb.cpu().numpy()
 
