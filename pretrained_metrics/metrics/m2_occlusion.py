@@ -229,6 +229,9 @@ class _SegBackend:
                 use_safetensors=True,
             ).to(self.device).eval()
             self._backend = "mask2former"
+            # Best-effort helper: load SegFormer parsing model to refine garment/body-parts
+            # while keeping Mask2Former as the primary backend.
+            self._try_load_segformer_helper()
             print("[OcclusionMetric] Using Mask2Former (COCO panoptic) "
                   "for comprehensive object segmentation.")
             return
@@ -280,6 +283,25 @@ class _SegBackend:
                 "[OcclusionMetric] No segmentation backend available. "
                 "Install Mask2Former, SegFormer, or DeepLabV3 dependencies."
             ) from e
+
+    # --------------------------------------------------------------------- #
+    def _try_load_segformer_helper(self):
+        """Best-effort SegFormer loader used as helper for Mask2Former refinement."""
+        try:
+            from transformers import (SegformerImageProcessor,
+                                       SegformerForSemanticSegmentation)
+            self._processor = SegformerImageProcessor.from_pretrained(
+                "mattmdjaga/segformer_b2_clothes"
+            )
+            self._model = SegformerForSemanticSegmentation.from_pretrained(
+                "mattmdjaga/segformer_b2_clothes",
+                use_safetensors=True,
+            ).to(self.device).eval()
+            print("[OcclusionMetric] + SegFormer helper loaded for garment/body-part refinement.")
+        except Exception:
+            # Keep Mask2Former-only mode; caller handles fallback behavior.
+            self._processor = None
+            self._model = None
     
     # --------------------------------------------------------------------- #
     def _try_load_object_detector(self):

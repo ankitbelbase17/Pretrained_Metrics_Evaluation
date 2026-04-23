@@ -383,7 +383,7 @@ def _probe_m6(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
         backend = getattr(obj._embedder, "_backend", None)
         return MetricAudit(
             key="m6",
-            metric="M6 Appearance",
+            metric="M6 Appearance (M9 alias)",
             status="LOADED",
             selected_backend=backend,
             fallback_used=(backend != "arcface"),
@@ -395,7 +395,7 @@ def _probe_m6(device: str, batches: List[Dict[str, torch.Tensor]]) -> MetricAudi
     except Exception as e:
         return MetricAudit(
             key="m6",
-            metric="M6 Appearance",
+            metric="M6 Appearance (M9 alias)",
             status="NOT LOADED",
             selected_backend=None,
             fallback_used=None,
@@ -971,7 +971,7 @@ def run_checks(args) -> int:
     print("\n" + _cyan("METRIC COMPUTE AUDIT"))
     print("-" * 90)
     for key, fn in probes:
-        if any(s.lower() in key.lower() for s in args.skip):
+        if any(s.lower() in key.lower() for s in args.skip) and not (args.require_appearance and key == "m6"):
             print(f"  {_yellow('SKIP'):<20} [{key.upper()}] metric check skipped")
             skipped_count += 1
             continue
@@ -993,6 +993,12 @@ def run_checks(args) -> int:
             if audit.status != "LOADED":
                 failed_count += 1
         print(f"      elapsed          : {dt:.1f}s\n")
+
+    if args.require_appearance:
+        app = metric_results.get("m6")
+        if app is None or app.status != "LOADED":
+            print(f"  {_red('NOT LOADED'):<20} [M6] Appearance is required but not loaded.")
+            failed_count += 1
 
     print(_cyan("EDA COMPUTE AUDIT"))
     print("-" * 90)
@@ -1146,6 +1152,8 @@ def _parse():
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--skip", nargs="*", default=[], help="Skip keys by substring, e.g. m8 p9 vlm")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--require_appearance", action="store_true",
+                   help="Fail audit when appearance metric (M6) is not loaded.")
     p.add_argument("--cache_dir", type=str, default="./eda_cache", help="Compatibility arg (unused in compute mode)")
     p.add_argument("--download_base", type=str, default=DEFAULT_MODEL_BASE)
     p.add_argument(

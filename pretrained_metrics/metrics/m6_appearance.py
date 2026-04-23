@@ -36,7 +36,10 @@ dict with:
 
 from __future__ import annotations
 
+import contextlib
+import io
 import math
+import warnings
 from typing import Dict, List
 
 import numpy as np
@@ -69,11 +72,20 @@ class _FaceEmbedder:
         try:
             import insightface
             from insightface.app import FaceAnalysis
+            # Silence verbose InsightFace model/provider logs.
+            quiet_out = io.StringIO()
+            # Suppress noisy deprecation warning from internal face alignment path.
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*estimate.*deprecated.*SimilarityTransform.*",
+                category=FutureWarning,
+            )
             # Force ONNX Runtime CPU provider for stable, deterministic behavior.
             providers = ["CPUExecutionProvider"]
             ctx_id = -1
-            self._app = FaceAnalysis(providers=providers)
-            self._app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+            with contextlib.redirect_stdout(quiet_out), contextlib.redirect_stderr(quiet_out):
+                self._app = FaceAnalysis(providers=providers)
+                self._app.prepare(ctx_id=ctx_id, det_size=(640, 640))
             self._backend = "arcface"
             print("[AppearanceMetric] Using InsightFace ArcFace (CPUExecutionProvider).")
             return

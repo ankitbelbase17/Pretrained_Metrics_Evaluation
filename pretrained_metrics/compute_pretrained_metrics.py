@@ -598,6 +598,8 @@ def _parse():
     p.add_argument("--no_garment", action="store_true")
     p.add_argument("--no_vae",     action="store_true")
     p.add_argument("--no_camera",  action="store_true")
+    p.add_argument("--force_appear", action="store_true",
+                   help="Force-enable appearance metric for all datasets/config entries.")
     return p.parse_args()
 
 
@@ -626,6 +628,8 @@ def main():
         run_vae=     not args.no_vae,
         run_camera=  not args.no_camera,
     )
+    if args.force_appear:
+        base_cfg["run_appear"] = True
 
     output_dir = args.output_dir
 
@@ -641,6 +645,8 @@ def main():
         defaults = {**base_cfg, **raw.get("defaults", {})}
         for entry in raw.get("datasets", []):
             cfg  = {**defaults, **entry}
+            if args.force_appear:
+                cfg["run_appear"] = True
             name = cfg.pop("name")
             root = cfg.pop("root")
             cfg.pop("pred_dir", None)

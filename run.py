@@ -268,6 +268,7 @@ def _print_no_fallback_execution_report(args):
         "cuda" if args.gpus > 0 else "cpu",
         "--cache_dir",
         str(Path(args.output_dir) / "eda_cache"),
+        "--require_appearance",
     ]
     print("\n" + "=" * 70)
     print("  No-Fallback Execution Report (Metrics + EDA)")
@@ -382,6 +383,7 @@ def phase1_pretrained_metrics(args):
         "--output_dir", str(metrics_dir),
         "--batch_size", str(args.batch_size),
         "--num_workers", str(args.num_workers),
+        "--force_appear",
     ]
     ok = _run_python(script, cli_args, "Pretrained Metrics (all datasets)", gpus=1)
     if not ok:

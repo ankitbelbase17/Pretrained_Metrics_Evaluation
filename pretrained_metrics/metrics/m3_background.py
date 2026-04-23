@@ -74,6 +74,13 @@ class _PersonSegmenter:
     @torch.no_grad()
     def __call__(self, imgs: torch.Tensor) -> torch.Tensor:
         """Returns (B, H, W) bool tensor — True = person pixel."""
+        # Accept either BCHW or BHWC and normalize to BCHW.
+        if imgs.ndim != 4:
+            raise RuntimeError(f"[BackgroundMetric] Expected 4D tensor, got shape={tuple(imgs.shape)}")
+        if imgs.shape[1] != 3 and imgs.shape[-1] == 3:
+            imgs = imgs.permute(0, 3, 1, 2).contiguous()
+        if imgs.shape[1] != 3:
+            raise RuntimeError(f"[BackgroundMetric] Expected channel dimension C=3, got shape={tuple(imgs.shape)}")
         B, C, H, W = imgs.shape
         if self._model is not None:
             norm = T.Normalize(mean=[0.485, 0.456, 0.406],
@@ -292,6 +299,14 @@ class BackgroundMetrics:
     # ------------------------------------------------------------------ #
     def update(self, person_imgs: torch.Tensor):
         """person_imgs : (B, 3, H, W)  float32  [0,1]"""
+        # Be robust to dataloaders that emit BHWC tensors.
+        if person_imgs.ndim != 4:
+            raise RuntimeError(f"[BackgroundMetric] Expected 4D tensor, got shape={tuple(person_imgs.shape)}")
+        if person_imgs.shape[1] != 3 and person_imgs.shape[-1] == 3:
+            person_imgs = person_imgs.permute(0, 3, 1, 2).contiguous()
+        if person_imgs.shape[1] != 3:
+            raise RuntimeError(f"[BackgroundMetric] Expected channel dimension C=3, got shape={tuple(person_imgs.shape)}")
+
         person_masks = self._segmenter(person_imgs)      # (B,H,W) bool
         obj_counts   = self._detector.count_objects(person_imgs, person_masks)
         class_lists  = self._detector.detect_classes(person_imgs, person_masks)
