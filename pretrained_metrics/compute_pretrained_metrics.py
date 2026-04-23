@@ -226,15 +226,27 @@ def evaluate_one_dataset(
     print(f"  Samples : {n_samples}")
 
     # ── Metric objects ────────────────────────────────────────────────────────
+    def _loaded(msg: str):
+        print(f"  [Model] {msg} loaded")
+
     m1 = PoseMetrics(device=device)           if run_pose    else None
+    if m1: _loaded("M1 Pose")
     m2 = OcclusionMetrics(device=device)      if run_occ     else None
+    if m2: _loaded("M2 Occlusion")
     m3 = BackgroundMetrics(device=device)     if run_bg      else None
+    if m3: _loaded("M3 Background")
     m4 = IlluminationMetrics()                if run_illum   else None
+    if m4: _loaded("M4 Illumination")
     m5 = BodyShapeMetrics(device=device)      if run_shape   else None
+    if m5: _loaded("M5 BodyShape")
     m6 = AppearanceMetrics(device=device)     if run_appear  else None
+    if m6: _loaded("M6 Appearance")
     m7 = GarmentTextureMetrics(device=device) if run_garment else None
+    if m7: _loaded("M7 GarmentTexture")
     m8 = VAELatentMetric(device=device)       if run_vae     else None
+    if m8: _loaded("M8 VAE")
     m9 = CameraAngleMetrics(device=device)    if run_camera  else None
+    if m9: _loaded("M9 CameraAngle")
 
     # ── Batch loop ────────────────────────────────────────────────────────────
     t0 = time.time()
