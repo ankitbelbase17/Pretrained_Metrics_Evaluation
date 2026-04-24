@@ -358,6 +358,7 @@ DISPLAY_KEYS = [
     ("luminance_mean_global",       "Luminance Mean"),
     ("luminance_var_global",        "Luminance Var"),
     ("illumination_gradient_mean",  "Illum. Gradient Mean"),
+    ("illumination_richness_score", "Illum. Richness Score"),
     ("illumination_complexity",     "Illum. Complexity"),
     # M5
     ("shape_diversity_logdet",      "Shape Diversity (log-det)"),

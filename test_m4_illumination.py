@@ -29,8 +29,8 @@ def main() -> int:
         args=args,
         metric_title="M4 Illumination",
         probe_fn=_probe_m4,
-        paper_score_key="illumination_complexity",
-        paper_score_label="Illumination Complexity",
+        paper_score_key="illumination_richness_score",
+        paper_score_label="Illumination Richness Score",
         set_home_for_hmr2=False,
     )
 

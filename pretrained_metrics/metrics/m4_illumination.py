@@ -21,6 +21,7 @@ dict with:
     luminance_mean_global       : mean of per-image mean-L
     luminance_var_global        : robust spread (MAD) or variance of per-image mean-L
     illumination_gradient_mean  : mean of per-image (normalised) gradient-variance
+    illumination_richness_score : lighting/shadow richness (gradient-driven, brightness-decoupled)
     illumination_complexity     : luminance_var_global + illumination_gradient_mean
 """
 
@@ -160,7 +161,8 @@ class IlluminationMetrics:
         if not self._mean_L:
             return {k: float("nan") for k in [
                 "luminance_mean_global", "luminance_var_global",
-                "illumination_gradient_mean", "illumination_complexity",
+                "illumination_gradient_mean", "illumination_richness_score",
+                "illumination_complexity",
             ]}
         arr_L = np.array(self._mean_L)
         arr_gv = np.array(self._grad_var)
@@ -176,6 +178,7 @@ class IlluminationMetrics:
             "luminance_mean_global": lum_mean,
             "luminance_var_global": lum_var,
             "illumination_gradient_mean": grad_mean,
+            "illumination_richness_score": grad_mean,
             "illumination_complexity": lum_var + grad_mean,
         }
 
