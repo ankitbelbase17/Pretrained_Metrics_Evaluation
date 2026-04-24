@@ -26,6 +26,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="M2 Occlusion metric test across all configured datasets")
     add_common_args(parser)
     args = parser.parse_args()
+    if not args.only_datasets:
+        args.only_datasets = ["dresscode", "street_tryon"]
+    if not args.only_dresscode_categories:
+        args.only_dresscode_categories = ["dresses"]
     return run_metric_on_all_datasets(
         args=args,
         metric_title="M2 Occlusion",

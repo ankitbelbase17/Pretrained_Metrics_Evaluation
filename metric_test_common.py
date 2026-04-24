@@ -36,6 +36,12 @@ def add_common_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--download_base", default=DEFAULT_MODEL_BASE)
     p.add_argument("--config", type=str, default="configs/pretrained_metrics_datasets.yaml")
     p.add_argument("--only_datasets", nargs="*", default=None)
+    p.add_argument(
+        "--only_dresscode_categories",
+        nargs="*",
+        default=None,
+        help="Optional filter for DressCode categories (e.g., dresses upper_body lower_body).",
+    )
     p.add_argument("--max_datasets", type=int, default=0)
     p.add_argument("--split", type=str, default=None, help="Optional split override for all datasets")
     p.add_argument("--batch_size", type=int, default=16)
@@ -95,6 +101,19 @@ def _load_entries(args: argparse.Namespace) -> List[Dict]:
     if args.only_datasets:
         filt = {d.lower() for d in args.only_datasets}
         entries = [e for e in entries if str(e.get("name", "")).lower() in filt]
+
+    if args.only_dresscode_categories:
+        allowed = {c.lower() for c in args.only_dresscode_categories}
+        filtered: List[Dict] = []
+        for e in entries:
+            name = str(e.get("name", "")).lower()
+            if name != "dresscode":
+                filtered.append(e)
+                continue
+            cat = str(e.get("dresscode_category", "all")).lower()
+            if cat in allowed:
+                filtered.append(e)
+        entries = filtered
 
     merged: List[Dict] = []
     for e in entries:
