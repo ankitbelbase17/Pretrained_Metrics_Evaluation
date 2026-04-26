@@ -60,7 +60,6 @@ from EDA.plots.p3_background_eda import plot_bg_entropy_histogram, plot_entropy_
 from EDA.plots.p4_illumination_eda import plot_luminance_spectrum, plot_illumination_pca
 from EDA.plots.p5_body_shape_eda import plot_shape_pca, plot_shape_coefficient_histograms
 from EDA.plot_style import set_global_prefix
-from EDA.plots.p6_appearance_eda import plot_face_umap, plot_pairwise_distance_distribution
 from EDA.plots.p7_garment_eda import plot_garment_umap, plot_eigenvalue_spectrum
 from EDA.plots.p11_clip_embedding_eda import run_clip_embedding_eda
 
@@ -134,7 +133,7 @@ _CHECKPOINT_EVERY   = 2000      # save intermediate .npz every N images
 _FEATURE_KEYS       = [
     "pose_vecs", "angles", "occlusion", "bg_entropy",
     "bg_obj_count", "lum_mean", "lum_grad_var",
-    "betas", "face_embs", "garment_embs",
+    "betas", "garment_embs",
     "azimuths", "elevations", "camera_confidence",
 ]
 
@@ -290,22 +289,6 @@ def _extract_body_shape(loader, tf, device, batch_size, verbose, **kw):
     return {"betas": betas}
 
 
-def _extract_appearance(loader, tf, device, batch_size, verbose, **kw):
-    from pretrained_metrics.metrics.m6_appearance import _FaceEmbedder
-    if verbose:
-        print("\n    [appearance] Loading backend...")
-    backend = _FaceEmbedder(device)
-    face_embs = []
-    for person_batch, _ in _batched(loader, tf, batch_size, verbose, **kw):
-        f = backend(person_batch)
-        for fi in f:
-            face_embs.append(fi.astype(np.float32))
-    del backend; _free_gpu()
-    if verbose:
-        print(f"    [appearance] Done ({len(face_embs)} samples)")
-    return {"face_embs": face_embs}
-
-
 def _extract_garment(loader, tf, device, batch_size, verbose, **kw):
     from pretrained_metrics.metrics.m7_garment_texture import _GarmentEncoder
     if verbose:
@@ -353,7 +336,6 @@ _METRIC_EXTRACTORS = [
     ("background",   ["bg_entropy", "bg_obj_count"], _extract_background),
     ("illumination", ["lum_mean", "lum_grad_var"],   _extract_illumination),
     ("body_shape",   ["betas"],                      _extract_body_shape),
-    ("appearance",   ["face_embs"],                  _extract_appearance),
     ("garment",      ["garment_embs"],               _extract_garment),
     ("camera",       ["azimuths", "elevations", "camera_confidence"], _extract_camera),
 ]
@@ -366,7 +348,6 @@ _METRIC_BATCH_MULTIPLIER = {
     "background": 2.0,
     "illumination": 2.0,
     "body_shape": 1.0,
-    "appearance": 1.0,
     "garment": 2.0,
     "camera": 1.0,
 }

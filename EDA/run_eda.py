@@ -4,7 +4,7 @@ EDA/run_eda.py
 Master EDA runner for the VTON Dataset Analytics Pipeline.
 
 Step 1:  Feature extraction  (once per dataset, cached to .npz)
-Step 2:  Generate all 8 plot families (P1–P7 + Meta)
+Step 2:  Generate enabled plot families (appearance/latent plots removed)
 
 The pipeline works in two modes:
   (A) Real datasets — reads images via dataloaders
@@ -37,7 +37,6 @@ Output
   figures/background/     ← P3
   figures/illumination/   ← P4
   figures/body_shape/     ← P5
-  figures/appearance/     ← P6
   figures/garment/        ← P7
   figures/meta/           ← P8 correlation matrix
 """
@@ -64,13 +63,9 @@ from plots.p2_occlusion_eda   import plot_occlusion_histogram, plot_occlusion_he
 from plots.p3_background_eda  import plot_bg_entropy_histogram, plot_entropy_vs_objects
 from plots.p4_illumination_eda import plot_luminance_spectrum, plot_illumination_pca
 from plots.p5_body_shape_eda  import plot_shape_pca, plot_shape_coefficient_histograms
-from plots.p6_appearance_eda  import plot_face_umap, plot_pairwise_distance_distribution
 from plots.p7_garment_eda     import plot_garment_umap, plot_eigenvalue_spectrum
 from plots.p8_meta_correlation import (
     plot_correlation_matrix, plot_scatter_matrix, _build_feature_matrix
-)
-from plots.p9_vae_eda          import (
-    plot_vae_pca, plot_vae_pca_combined, plot_vae_explained_variance, plot_vae_tsne
 )
 from plots.p10_camera_angle_eda import run_camera_angle_eda, plot_camera_angle_comparison
 
@@ -172,26 +167,14 @@ def run_all_plots(
     # ── P8: Meta correlation ─────────────────────────────────────────────
     if "p8" not in skip:
         print("\n  [P8] Meta correlation …")
-        Xs = {n: _build_feature_matrix(d) for n, d in all_data.items()}
-        plot_correlation_matrix(Xs, out_dir=str(P / "meta"))
+        built = {n: _build_feature_matrix(d) for n, d in all_data.items()}
+        Xs = {n: v[0] for n, v in built.items()}
+        feature_names_short = next(iter(built.values()))[2] if built else []
+        plot_correlation_matrix(Xs, feature_names_short, out_dir=str(P / "meta"))
         if not no_pairplot:
-            plot_scatter_matrix(Xs, out_dir=str(P / "meta"))
-    # ── P9: VAE Latent Space ────────────────────────────────────────
-    if "p9" not in skip:
-        # Check if VAE embeddings exist
-        has_vae = any("vae_embs" in d for d in all_data.values())
-        if has_vae:
-            print("\n  [P9] VAE Latent Space …")
-            vae_data = {n: d["vae_embs"] for n, d in all_data.items() if "vae_embs" in d}
-            try:
-                plot_vae_pca(vae_data, out_dir=str(P / "vae"))
-                plot_vae_pca_combined(vae_data, out_dir=str(P / "vae"))
-                plot_vae_explained_variance(vae_data, out_dir=str(P / "vae"))
-                plot_vae_tsne(vae_data, out_dir=str(P / "vae"))
-            except ImportError as e:
-                print(f"\n  [P9] Skipping VAE plots (missing optional dependency: {e})")
-        else:
-            print("\n  [P9] Skipping VAE plots (no vae_embs in cache)")
+            plot_scatter_matrix(Xs, feature_names_short, out_dir=str(P / "meta"))
+    # ── P9: VAE Latent Space (globally disabled) ─────────────────────
+    print("\n  [P9] VAE Latent Space … disabled (latent-diversity EDA plots removed)")
 
     # ── P10: Camera Angle (explicit azimuth/elevation only) ─────────
     if "p10" not in skip:
@@ -231,9 +214,7 @@ def _make_synthetic_data(n: int = 200, seed: int = 0) -> dict:
         lum_grad_var= rng.exponential(0.01, n).astype(np.float32),
         lum_maps    = rng.random((n, H, W)).astype(np.float32),
         betas       = rng.normal(0, 1, (n, 10)).astype(np.float32),
-        face_embs   = rng.normal(0, 1, (n, 512)).astype(np.float32),
         garment_embs= rng.normal(0, 1, (n, 512)).astype(np.float32),
-        vae_embs    = rng.normal(0, 1, (n, 4*64*48)).astype(np.float32),
         azimuths    = rng.uniform(-180, 180, n).astype(np.float32),
         elevations  = rng.uniform(-45, 45, n).astype(np.float32),
     )

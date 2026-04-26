@@ -24,9 +24,7 @@ Per-image features stored
   grad_var_i: float   Var(Sobel magnitude) of L channel    (m4)
   lum_map_i : (h,w)   downsampled L channel map            (m4)
   beta_i    : (10,)   body shape coefficients (proxy)      (m5)
-  face_i    : (D,)    ArcFace / CLIP face embedding        (m6)
   garment_i : (D,)    CLIP garment embedding               (m7)
-  vae_i     : (D,)    Stable Diffusion VAE latent          (m8)
 
 Everything is stored as a single ``.npz`` file per dataset in ``cache_dir``.
 """
@@ -57,9 +55,7 @@ from pretrained_metrics.metrics.m2_occlusion       import _SegBackend
 from pretrained_metrics.metrics.m3_background      import _PersonSegmenter, _texture_entropy, _ObjectDetector
 from pretrained_metrics.metrics.m4_illumination    import _rgb_to_lab_l, _sobel_gradient_variance
 from pretrained_metrics.metrics.m5_body_shape      import _ShapeExtractor
-from pretrained_metrics.metrics.m6_appearance      import _FaceEmbedder
 from pretrained_metrics.metrics.m7_garment_texture import _GarmentEncoder
-from pretrained_metrics.metrics.m8_vae_latent      import _VAEEncoder
 from pretrained_metrics.metrics.m9_camera_angle    import _CameraAngleBackend
 
 
@@ -107,9 +103,7 @@ class FeatureExtractor:
         self._per_seg    = _PersonSegmenter(device)
         self._obj_det    = _ObjectDetector(device)
         self._shape_ex   = _ShapeExtractor(device)
-        self._face_ex    = _FaceEmbedder(device)
         self._garment_ex = _GarmentEncoder(device)
-        self._vae_ex     = _VAEEncoder(device)
         self._camera_ex  = None
         try:
             self._camera_ex = _CameraAngleBackend(device)
@@ -149,7 +143,7 @@ class FeatureExtractor:
         -------
         dict with keys that match the batch-level feature names:
             pose_vecs, angles, occlusion, bg_entropy, bg_obj_count,
-            lum_mean, lum_grad_var, betas, face_embs, garment_embs
+            lum_mean, lum_grad_var, betas, garment_embs
         """
         from PIL import Image
 
@@ -202,10 +196,6 @@ class FeatureExtractor:
         # M5 – Body shape
         b = self._shape_ex(person_t)
         out["betas"] = b[0].astype(np.float32)
-
-        # M6 – Appearance
-        f = self._face_ex(person_t)
-        out["face_embs"] = f[0].astype(np.float32)
 
         # M7 – Garment
         g = self._garment_ex(cloth_t)
@@ -299,8 +289,7 @@ class FeatureExtractor:
         occ_ratios, occ_maps   = [], []
         bg_ents, bg_objs       = [], []
         lum_means, lum_vars, lum_maps_acc = [], [], []
-        betas, face_embs, garment_embs    = [], [], []
-        vae_embs = []
+        betas, garment_embs    = [], []
         azimuths, elevations, cam_conf = [], [], []
 
         for batch in tqdm(loader, desc=f"  {dataset_name}", unit="batch"):
@@ -372,20 +361,10 @@ class FeatureExtractor:
             for bi in b:
                 betas.append(bi.astype(np.float32))
 
-            # ── M6: Appearance ──────────────────────────────────────────── #
-            f = self._face_ex(person)                    # (B, D)
-            for fi in f:
-                face_embs.append(fi.astype(np.float32))
-
             # ── M7: Garment ─────────────────────────────────────────────── #
             g = self._garment_ex(cloth)                  # (B, D)
             for gi in g:
                 garment_embs.append(gi.astype(np.float32))
-
-            # ── M8: VAE Latent ──────────────────────────────────────────── #
-            v = self._vae_ex(person)                     # (B, D)
-            for vi in v:
-                vae_embs.append(vi.astype(np.float32))
 
             # ── M9: Camera Angle (optional) ─────────────────────────────── #
             if self._camera_ex is not None:
@@ -415,9 +394,7 @@ class FeatureExtractor:
             lum_grad_var = np.array(lum_vars,      dtype=np.float32),
             lum_maps     = np.stack(lum_maps_acc),
             betas        = np.stack(betas),
-            face_embs    = np.stack(face_embs),
             garment_embs = np.stack(garment_embs),
-            vae_embs     = np.stack(vae_embs),
         )
         if azimuths:
             data["azimuths"] = np.array(azimuths, dtype=np.float32)

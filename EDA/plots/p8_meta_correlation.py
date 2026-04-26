@@ -3,8 +3,9 @@ EDA/plots/p8_meta_correlation.py
 ==================================
 Meta-EDA — ECCV Publication Figures
 
-Constructs a per-image feature vector:
-    x_i = [pose_norm, O_i, H_bg, L_i, ||β_i||, ||f_i||, ||g_i||]
+Constructs a per-image feature vector using available cached features.
+Typical vector:
+    x_i = [pose_norm, O_i, H_bg, L_i, ||β_i||, ||g_i||]
 
 Computes Pearson correlation matrix → seaborn heatmap.
 
@@ -39,21 +40,20 @@ from plot_style import (
 
 apply_paper_style()
 
-# Feature names for display
-FEATURE_NAMES = [
+BASE_FEATURE_NAMES = [
     "Pose\n$||v_i||$",
     "Occlusion\n$O_i$",
     "BG Entropy\n$H_{bg}$",
     "Luminance\n$L_i$",
     "Shape\n$||\\beta_i||$",
-    "Face\n$||f_i||$",
-    "Garment\n$||g_i||$",
 ]
 
-FEATURE_NAMES_SHORT = [
-    "Pose", "Occ", "BG",
-    "Lum", "Shape", "Face", "Garment",
-]
+BASE_FEATURE_NAMES_SHORT = ["Pose", "Occ", "BG", "Lum", "Shape"]
+
+FACE_FEATURE_NAME = "Face\n$||f_i||$"
+FACE_FEATURE_NAME_SHORT = "Face"
+GARMENT_FEATURE_NAME = "Garment\n$||g_i||$"
+GARMENT_FEATURE_NAME_SHORT = "Garment"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -63,32 +63,39 @@ FEATURE_NAMES_SHORT = [
 def _build_feature_matrix(d: dict) -> np.ndarray:
     """
     d: loaded .npz dict.
-    Returns (N, 7) float32 matrix — one row per image.
+    Returns (N, K) float32 matrix and feature labels.
     """
     pose_norm    = np.linalg.norm(d["pose_vecs"],    axis=1)
     occ          = d["occ_ratios"].astype(np.float32)
     bg_ent       = d["bg_entropy"].astype(np.float32)
     lum          = d["lum_mean"].astype(np.float32)
     shape_norm   = np.linalg.norm(d["betas"],         axis=1).astype(np.float32)
-    # Use centroid-distance diversity instead of vector norm.
-    # (Norm is near-constant for L2-normalized embeddings and carries little signal.)
-    face = d["face_embs"].astype(np.float32)
-    face = face / (np.linalg.norm(face, axis=1, keepdims=True) + 1e-12)
-    face_mu = face.mean(axis=0, keepdims=True)
-    face_mu = face_mu / (np.linalg.norm(face_mu, axis=1, keepdims=True) + 1e-12)
-    face_norm = (1.0 - np.sum(face * face_mu, axis=1)).astype(np.float32)
+    cols = [pose_norm, occ, bg_ent, lum, shape_norm]
+    names = list(BASE_FEATURE_NAMES)
+    names_short = list(BASE_FEATURE_NAMES_SHORT)
+
+    # Optional face column (legacy caches only).
+    if "face_embs" in d:
+        face = d["face_embs"].astype(np.float32)
+        face = face / (np.linalg.norm(face, axis=1, keepdims=True) + 1e-12)
+        face_mu = face.mean(axis=0, keepdims=True)
+        face_mu = face_mu / (np.linalg.norm(face_mu, axis=1, keepdims=True) + 1e-12)
+        face_norm = (1.0 - np.sum(face * face_mu, axis=1)).astype(np.float32)
+        cols.append(face_norm)
+        names.append(FACE_FEATURE_NAME)
+        names_short.append(FACE_FEATURE_NAME_SHORT)
 
     garment = d["garment_embs"].astype(np.float32)
     garment = garment / (np.linalg.norm(garment, axis=1, keepdims=True) + 1e-12)
     garment_mu = garment.mean(axis=0, keepdims=True)
     garment_mu = garment_mu / (np.linalg.norm(garment_mu, axis=1, keepdims=True) + 1e-12)
     garment_norm = (1.0 - np.sum(garment * garment_mu, axis=1)).astype(np.float32)
+    cols.append(garment_norm)
+    names.append(GARMENT_FEATURE_NAME)
+    names_short.append(GARMENT_FEATURE_NAME_SHORT)
 
-    X = np.stack(
-        [pose_norm, occ, bg_ent, lum, shape_norm, face_norm, garment_norm],
-        axis=1
-    )
-    return X
+    X = np.stack(cols, axis=1)
+    return X, names, names_short
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -96,7 +103,8 @@ def _build_feature_matrix(d: dict) -> np.ndarray:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def plot_correlation_matrix(
-    datasets: Dict[str, np.ndarray],   # {name: feature_matrix (N,7)}
+    datasets: Dict[str, np.ndarray],
+    feature_names_short: List[str],
     out_dir: str = "figures/meta",
 ):
     """
@@ -118,7 +126,7 @@ def plot_correlation_matrix(
     axes = axes.flatten()
 
     def _corr_heatmap(X, ax, title):
-        df = pd.DataFrame(X, columns=FEATURE_NAMES_SHORT)
+        df = pd.DataFrame(X, columns=feature_names_short)
         corr = df.corr(method="pearson")
         
         # Create mask for upper triangle (optional - keep full for clarity)
@@ -133,8 +141,8 @@ def plot_correlation_matrix(
             linewidths=0.3, linecolor="white",
             square=True, 
             cbar_kws={"shrink": 0.7, "aspect": 20},
-            xticklabels=FEATURE_NAMES_SHORT,
-            yticklabels=FEATURE_NAMES_SHORT,
+            xticklabels=feature_names_short,
+            yticklabels=feature_names_short,
         )
         ax.set_title(title, fontsize=9, fontweight="bold", pad=6)
         ax.tick_params(axis="x", rotation=45, labelsize=7)
@@ -174,7 +182,8 @@ def plot_correlation_matrix(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def plot_scatter_matrix(
-    datasets: Dict[str, np.ndarray],   # {name: feature_matrix (N,7)}
+    datasets: Dict[str, np.ndarray],
+    feature_names_short: List[str],
     out_dir: str = "figures/meta",
     max_per_ds: int = 300,
 ):
@@ -187,7 +196,7 @@ def plot_scatter_matrix(
         rng = np.random.default_rng(0)
         idx = rng.choice(len(X), min(max_per_ds, len(X)), replace=False)
         Xs  = np.nan_to_num(X[idx])
-        df  = pd.DataFrame(Xs, columns=FEATURE_NAMES_SHORT)
+        df  = pd.DataFrame(Xs, columns=feature_names_short)
         df["Dataset"] = name
         rows_list.append(df)
 
@@ -239,13 +248,20 @@ def _cli():
     args = p.parse_args()
 
     Xs = {}
+    names_short_ref = None
     for f, lbl in zip(args.features, args.labels):
         d     = dict(np.load(f, allow_pickle=True))
-        Xs[lbl] = _build_feature_matrix(d)
+        X, _names, names_short = _build_feature_matrix(d)
+        Xs[lbl] = X
+        if names_short_ref is None:
+            names_short_ref = names_short
 
-    plot_correlation_matrix(Xs, args.out_dir)
+    if names_short_ref is None:
+        raise RuntimeError("No features loaded for meta-correlation plots")
+
+    plot_correlation_matrix(Xs, names_short_ref, args.out_dir)
     if not args.no_pairplot:
-        plot_scatter_matrix(Xs, args.out_dir)
+        plot_scatter_matrix(Xs, names_short_ref, args.out_dir)
 
 
 if __name__ == "__main__":
