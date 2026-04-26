@@ -13,7 +13,8 @@ Metric 1 — Pose Diversity & Pose Articulation Complexity
 
 Pretrained model
 -----------------
-Keypoint R-CNN (torchvision), COCO-17 keypoints.
+OpenMMLab MMPose ViTPose + person detector (primary),
+HuggingFace ViTPose fallback. COCO-17 keypoints.
 
 Input
 ------
@@ -34,6 +35,7 @@ from typing import Dict, List
 
 import numpy as np
 import torch
+import torchvision.transforms.functional as TF
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -73,32 +75,50 @@ IDX_R_HIP      = J2I["right_hip"]
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _KeypointExtractor:
-    """COCO-17 keypoint extractor using torchvision KeypointRCNN."""
+    """COCO-17 keypoint extractor using MMPose ViTPose (fallback: HF ViTPose)."""
 
     INPUT_SIZE = (256, 192)   # H×W for most top-down pose models
 
     def __init__(self, device: str = "cpu"):
         self.device = device
-        self._backend = "keypointrcnn"
-        self._krcnn = None
+        self._backend = "none"
+        self._mmpose_inferencer = None
+        self._model = None
+        self._processor = None
         self._load()
 
     # --------------------------------------------------------------------- #
     def _load(self):
         try:
-            import torchvision
+            from mmpose.apis import MMPoseInferencer
 
-            weights = torchvision.models.detection.KeypointRCNN_ResNet50_FPN_Weights.DEFAULT
-            self._krcnn = torchvision.models.detection.keypointrcnn_resnet50_fpn(
-                weights=weights
+            self._mmpose_inferencer = MMPoseInferencer(
+                pose2d="vitpose-b",
+                det_model="rtmdet_m",
+                det_cat_ids=[0],
+                device=self.device,
             )
-            self._krcnn = self._krcnn.to(self.device).eval()
-            self._backend = "keypointrcnn"
-            print("[PoseMetric] Using KeypointRCNN for keypoint extraction.")
+            self._backend = "mmpose_vitpose"
+            print("[PoseMetric] Using OpenMMLab MMPose ViTPose + detector.")
+            return
+        except Exception as e:
+            print(f"[PoseMetric] MMPose ViTPose unavailable ({e}); trying HF ViTPose fallback.")
+
+        try:
+            from transformers import AutoProcessor, VitPoseForPoseEstimation
+
+            self._processor = AutoProcessor.from_pretrained("usyd-community/vitpose-base-simple")
+            self._model = VitPoseForPoseEstimation.from_pretrained(
+                "usyd-community/vitpose-base-simple",
+                use_safetensors=True,
+            ).to(self.device).eval()
+            self._backend = "vitpose_hf_fallback"
+            print("[PoseMetric] Using HF ViTPose fallback for keypoint extraction.")
+            return
         except Exception as e2:
             raise RuntimeError(
-                "[PoseMetric] KeypointRCNN backend unavailable. "
-                "Ensure torchvision detection/keypoint dependencies are installed."
+                "[PoseMetric] No ViTPose backend available. "
+                "Install MMPose(+mmdet) or transformers ViTPose dependencies."
             ) from e2
 
     # --------------------------------------------------------------------- #
@@ -108,21 +128,73 @@ class _KeypointExtractor:
         imgs : (B, 3, H, W)  float32  [0,1]
         Returns : (B, 17, 2) numpy array of (x, y) pixel coordinates
         """
-        dets = self._krcnn([im.to(self.device) for im in imgs])
-        all_kps: List[np.ndarray] = []
-        for det in dets:
-            kps = det.get("keypoints")
-            scores = det.get("scores")
-            if kps is None or kps.numel() == 0:
-                all_kps.append(np.zeros((17, 2), dtype=np.float32))
+        if imgs.ndim != 4:
+            raise RuntimeError(f"[PoseMetric] Expected 4D tensor, got {tuple(imgs.shape)}")
+        if imgs.shape[1] != 3 and imgs.shape[-1] == 3:
+            imgs = imgs.permute(0, 3, 1, 2).contiguous()
+        if imgs.shape[1] != 3:
+            raise RuntimeError(f"[PoseMetric] Expected C=3, got {tuple(imgs.shape)}")
+
+        if self._backend == "mmpose_vitpose":
+            return self._extract_with_mmpose(imgs)
+        return self._extract_with_hf(imgs)
+
+    def _extract_with_mmpose(self, imgs: torch.Tensor) -> np.ndarray:
+        b = imgs.shape[0]
+        all_kps = np.zeros((b, 17, 2), dtype=np.float32)
+        for i in range(b):
+            img = imgs[i].permute(1, 2, 0).cpu().numpy()
+            img = np.clip(img * 255.0, 0.0, 255.0).astype(np.uint8)
+            try:
+                res = next(self._mmpose_inferencer(img, return_vis=False))
+                preds = res.get("predictions", [])
+                persons = preds[0] if preds and len(preds) > 0 else []
+                if not persons:
+                    continue
+
+                def _person_score(p):
+                    sc = p.get("keypoint_scores", None)
+                    if sc is None:
+                        return 0.0
+                    arr = np.asarray(sc, dtype=np.float32).reshape(-1)
+                    return float(np.mean(arr)) if arr.size else 0.0
+
+                best = max(persons, key=_person_score)
+                kps = np.asarray(best.get("keypoints", []), dtype=np.float32)
+                if kps.ndim == 2 and kps.shape[1] >= 2:
+                    n = min(17, kps.shape[0])
+                    all_kps[i, :n, :] = kps[:n, :2]
+            except Exception:
                 continue
-            best = int(torch.argmax(scores).item()) if scores is not None and scores.numel() else 0
-            kp = kps[best, :, :2].detach().cpu().numpy().astype(np.float32)
-            if kp.shape != (17, 2):
-                all_kps.append(np.zeros((17, 2), dtype=np.float32))
-            else:
-                all_kps.append(kp)
-        return np.stack(all_kps, axis=0)
+        return all_kps
+
+    def _extract_with_hf(self, imgs: torch.Tensor) -> np.ndarray:
+        b, _c, h, w = imgs.shape
+        pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in imgs]
+        boxes = [np.array([[0.0, 0.0, float(w), float(h)]], dtype=np.float32) for _ in range(b)]
+
+        inputs = self._processor(images=pils, boxes=boxes, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        outputs = self._model(**inputs)
+        pose_results = self._processor.post_process_pose_estimation(
+            outputs, boxes=boxes, threshold=0.1
+        )
+
+        all_kps = np.zeros((b, 17, 2), dtype=np.float32)
+        for i in range(b):
+            if i >= len(pose_results) or not pose_results[i]:
+                continue
+            person = pose_results[i][0]
+            keypoints = person.get("keypoints", [])
+            labels = person.get("labels", [])
+            for kp, label in zip(keypoints, labels):
+                idx = int(label.item() if torch.is_tensor(label) else label)
+                if 0 <= idx < 17:
+                    x = float(kp[0].item() if torch.is_tensor(kp[0]) else kp[0])
+                    y = float(kp[1].item() if torch.is_tensor(kp[1]) else kp[1])
+                    all_kps[i, idx, 0] = x
+                    all_kps[i, idx, 1] = y
+        return all_kps
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Normalise pose
