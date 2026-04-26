@@ -36,6 +36,57 @@ datasets:
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/hard
     split: test
 
+  # Qwen camera-edit control generation outputs
+  # Computes camera metrics for all difficulties and per-difficulty subsets.
+  - name: qwen_camera_results
+    root: /capstor/scratch/cscs/dbartaula/Qwen_camera_edit_control/results
+    split: all
+    run_pose: false
+    run_occ: false
+    run_bg: false
+    run_illum: false
+    run_shape: false
+    run_appear: false
+    run_garment: false
+    run_vae: false
+    run_camera: true
+  - name: qwen_camera_results
+    root: /capstor/scratch/cscs/dbartaula/Qwen_camera_edit_control/results/easy
+    split: easy
+    run_pose: false
+    run_occ: false
+    run_bg: false
+    run_illum: false
+    run_shape: false
+    run_appear: false
+    run_garment: false
+    run_vae: false
+    run_camera: true
+  - name: qwen_camera_results
+    root: /capstor/scratch/cscs/dbartaula/Qwen_camera_edit_control/results/medium
+    split: medium
+    run_pose: false
+    run_occ: false
+    run_bg: false
+    run_illum: false
+    run_shape: false
+    run_appear: false
+    run_garment: false
+    run_vae: false
+    run_camera: true
+  - name: qwen_camera_results
+    root: /capstor/scratch/cscs/dbartaula/Qwen_camera_edit_control/results/hard
+    split: hard
+    run_pose: false
+    run_occ: false
+    run_bg: false
+    run_illum: false
+    run_shape: false
+    run_appear: false
+    run_garment: false
+    run_vae: false
+    run_camera: true
+
   - name: viton_hd
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/viton_hd
     split: test

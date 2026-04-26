@@ -702,6 +702,100 @@ class CurvTONDataset(VITONHDDataset):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 13. Qwen Camera Edit Control Results
+# ─────────────────────────────────────────────────────────────────────────────
+class QwenCameraEditResultsDataset(BaseTryOnDataset):
+    """
+    Loader for generated result folders shaped like:
+
+        <root>/
+          easy/
+            easy_000/
+              img1_out0000.png
+              ...
+              latency.json
+            ...
+          medium/
+            medium_000/
+            ...
+          hard/
+            hard_000/
+            ...
+
+    It also supports pointing root directly at a single difficulty folder
+    (e.g. <root>/easy) or at a shard folder (e.g. <root>/easy/easy_000).
+
+    Since this dataset is generation-output-only, person/cloth/gt are all set to
+    the same output image path so metric modules can consume standard keys.
+    """
+
+    _DIFFICULTIES = ("easy", "medium", "hard")
+    _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+
+    def _load_samples(self) -> List[Dict]:
+        root = self.root
+        split_l = str(self.split).lower()
+
+        # Collect candidate difficulty roots.
+        difficulty_roots: List[Path] = []
+        if any((root / d).is_dir() for d in self._DIFFICULTIES):
+            # Root points to the top-level "results" folder.
+            selected = self._DIFFICULTIES if split_l in {"all", "test", "train", "val", "validation"} else (split_l,)
+            for d in selected:
+                p = root / d
+                if p.is_dir():
+                    difficulty_roots.append(p)
+        elif root.name.lower() in self._DIFFICULTIES:
+            # Root points directly to one difficulty folder.
+            difficulty_roots = [root]
+        else:
+            # Root might already be one shard directory (e.g. easy_000).
+            difficulty_roots = [root]
+
+        if not difficulty_roots:
+            raise FileNotFoundError(
+                f"Qwen camera-results root not recognized: {root}. "
+                f"Expected either '<root>/easy|medium|hard' or a direct difficulty directory."
+            )
+
+        samples: List[Dict] = []
+
+        for diff_root in difficulty_roots:
+            diff_name = diff_root.name.lower()
+
+            # Prefer shard dirs named like easy_000, medium_004, ...
+            shard_dirs = [
+                d for d in sorted(diff_root.iterdir())
+                if d.is_dir() and d.name.lower().startswith(f"{diff_name}_")
+            ]
+            if not shard_dirs:
+                shard_dirs = [diff_root]
+
+            for shard in shard_dirs:
+                for img in sorted(shard.iterdir()):
+                    if not img.is_file():
+                        continue
+                    if img.suffix.lower() not in self._IMAGE_EXTS:
+                        continue
+
+                    rel_id = f"{diff_name}/{shard.name}/{img.stem}"
+                    samples.append(dict(
+                        id=rel_id,
+                        person_path=img,
+                        cloth_path=img,
+                        gt_path=img,
+                        mask_path=None,
+                    ))
+
+        if not samples:
+            raise FileNotFoundError(
+                f"No images found under {root}. Expected output image files inside difficulty folders."
+            )
+
+        return samples
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  Registry
 # ─────────────────────────────────────────────────────────────────────────────
 DATASET_REGISTRY = {
@@ -721,6 +815,9 @@ DATASET_REGISTRY = {
 
     "street_tryon":       StreetTryOnDataset,
     "curvton":            CurvTONDataset,
+    "qwen_camera_results": QwenCameraEditResultsDataset,
+    "qwen_camera_edit_control": QwenCameraEditResultsDataset,
+    "qwen_camera": QwenCameraEditResultsDataset,
 
     # Specialized "Anish" Dedicated Loaders
     "dresscode_anish":    AnishDressCodeDataset,

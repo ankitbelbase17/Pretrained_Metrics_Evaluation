@@ -203,27 +203,43 @@ class _KeypointExtractor:
 def _normalise_pose(kps: np.ndarray) -> np.ndarray:
     """
     kps : (B, 17, 2)
-    Returns normalised (B, 17, 2) and a validity mask (B,) bool.
-    Translation: subtract hip centre.
-    Scale:       divide by torso length (neck→hip).
+    Returns normalised (B, 17, 2) and keypoint-validity mask (B, 17) bool.
+    Translation: subtract hip centre if available, else valid-keypoint centroid.
+    Scale:       torso length (neck→hip) if available, else valid-keypoint bbox diagonal.
     """
     B = kps.shape[0]
-    out   = kps.copy()
-    valid = np.ones(B, dtype=bool)
+    out = np.zeros_like(kps, dtype=np.float32)
+    valid_kp = np.isfinite(kps).all(axis=2) & (np.linalg.norm(kps, axis=2) > 1e-6)
 
     for i in range(B):
         p = kps[i]
-        hip    = (p[IDX_L_HIP]      + p[IDX_R_HIP])      / 2.0
-        neck   = (p[IDX_L_SHOULDER] + p[IDX_R_SHOULDER]) / 2.0
-        torso  = np.linalg.norm(neck - hip)
-
-        if torso < 1e-6:
-            valid[i] = False
+        vk = valid_kp[i]
+        if vk.sum() == 0:
             continue
 
-        out[i] = (p - hip) / torso
+        has_hips = bool(vk[IDX_L_HIP] and vk[IDX_R_HIP])
+        has_shoulders = bool(vk[IDX_L_SHOULDER] and vk[IDX_R_SHOULDER])
 
-    return out, valid
+        if has_hips:
+            center = (p[IDX_L_HIP] + p[IDX_R_HIP]) / 2.0
+        else:
+            center = p[vk].mean(axis=0)
+
+        if has_hips and has_shoulders:
+            neck = (p[IDX_L_SHOULDER] + p[IDX_R_SHOULDER]) / 2.0
+            scale = float(np.linalg.norm(neck - center))
+        else:
+            pts = p[vk]
+            mn = pts.min(axis=0)
+            mx = pts.max(axis=0)
+            scale = float(np.linalg.norm(mx - mn))
+
+        if scale < 1e-6:
+            continue
+
+        out[i, vk] = (p[vk] - center) / scale
+
+    return out, valid_kp
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -267,22 +283,23 @@ class PoseMetrics:
         person_imgs : (B, 3, H, W)  float32  [0,1]
         Call once per batch.
         """
-        kps_raw  = self.extractor(person_imgs)      # (B,17,2) numpy
-        kps_norm, valid = _normalise_pose(kps_raw)  # (B,17,2) normalised
+        kps_raw  = self.extractor(person_imgs)         # (B,17,2) numpy
+        kps_norm, valid_kp = _normalise_pose(kps_raw)  # (B,17,2), (B,17)
 
         for i in range(kps_raw.shape[0]):
-            if not valid[i]:
-                continue
-
             pn = kps_norm[i]   # (17, 2)
+            vk = valid_kp[i]   # (17,)
 
             # ── Pose vector ─────────────────────────────────────────────
-            # Use raw keypoints for log-det diversity (no pre-normalisation).
-            self._pose_vecs.append(kps_raw[i].flatten())   # (34,)
+            # Keep fixed-size representation; invalid keypoints remain zeros.
+            if int(vk.sum()) > 0:
+                self._pose_vecs.append(pn.flatten())   # (34,)
 
             # ── Joint angles ─────────────────────────────────────────────
             img_angles = []
             for t_idx, (ia, ib, ic) in enumerate(TRIPLET_IDX):
+                if not (vk[ia] and vk[ib] and vk[ic]):
+                    continue
                 ang = _joint_angle(pn[ia], pn[ib], pn[ic])
                 if not math.isnan(ang):
                     self._all_angles[t_idx].append(ang)
