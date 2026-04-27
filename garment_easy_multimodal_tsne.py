@@ -444,8 +444,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sample-ratio",
         type=float,
-        default=0.1,
-        help="Fraction of each gender to use (default: 0.1 = 10%), sampled randomly.",
+        default=0.25,
+        help="Fraction of each gender to use (default: 0.25 = 25%), sampled randomly.",
     )
     parser.add_argument(
         "--fuse-alpha",
