@@ -265,8 +265,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sample-ratio",
         type=float,
-        default=0.25,
-        help="Fraction of each gender to use (default: 0.25 = 25%%), sampled randomly.",
+        default=0.18,
+        help="Fraction of each gender to use (default: 0.18 = 18%%), sampled randomly.",
     )
     parser.add_argument("--tsne-perplexity", type=float, default=30.0)
     parser.add_argument("--umap-neighbors", type=int, default=30)
