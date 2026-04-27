@@ -10,6 +10,9 @@ from matplotlib.lines import Line2D
 import seaborn as sns
 
 
+REQUIRED_SAMPLE_RATIO = 0.2
+
+
 def _apply_eccv_style() -> None:
     try:
         from EDA.plot_style import apply_paper_style
@@ -272,12 +275,6 @@ def parse_args() -> argparse.Namespace:
         default=Path("./eda_cache/curvton"),
         help="Default cache directory to resolve easy/medium/hard NPZs.",
     )
-    parser.add_argument(
-        "--sample-ratio",
-        type=float,
-        default=0.2,
-        help="Sample ratio to apply when using full caches (default: 0.2 = 20%%).",
-    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/background_eda"))
     parser.add_argument("--bins", type=int, default=40)
@@ -299,9 +296,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    forced_ratio = REQUIRED_SAMPLE_RATIO
     auto_defaults = False
     if args.features is None and args.labels is None:
-        pct = int(round(args.sample_ratio * 100))
+        pct = int(round(forced_ratio * 100))
         args.features = [
             args.cache_dir / f"curvton_easy_{pct}pct.npz",
             args.cache_dir / f"curvton_medium_{pct}pct.npz",
@@ -321,7 +319,7 @@ def main() -> int:
     for path, label in zip(args.features, args.labels):
         ent, obj = _load_bg_features(Path(path))
         if not auto_defaults:
-            ent, obj = _subsample_pair(ent, obj, args.sample_ratio, args.seed)
+            ent, obj = _subsample_pair(ent, obj, forced_ratio, args.seed)
         ent, obj = _clean(ent, obj)
         ent_data[label] = ent
         obj_data[label] = obj

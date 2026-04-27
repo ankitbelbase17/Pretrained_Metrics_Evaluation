@@ -8,6 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+REQUIRED_SAMPLE_RATIO = 0.2
+
+
 def _apply_eccv_style() -> None:
     try:
         from EDA.plot_style import apply_paper_style
@@ -201,12 +204,6 @@ def parse_args() -> argparse.Namespace:
         default=Path("./eda_cache/curvton"),
         help="Default cache directory to resolve easy/medium/hard NPZs.",
     )
-    parser.add_argument(
-        "--sample-ratio",
-        type=float,
-        default=0.2,
-        help="Sample ratio to apply when using full caches (default: 0.2 = 20%%).",
-    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/body_shape_variation"))
     parser.add_argument("--stem", type=str, default="body_shape_variation_easy_medium_hard")
@@ -217,10 +214,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    forced_ratio = REQUIRED_SAMPLE_RATIO
 
     auto_defaults = False
     if args.easy is None and args.medium is None and args.hard is None:
-        pct = int(round(args.sample_ratio * 100))
+        pct = int(round(forced_ratio * 100))
         args.easy = args.cache_dir / f"curvton_easy_{pct}pct.npz"
         args.medium = args.cache_dir / f"curvton_medium_{pct}pct.npz"
         args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
@@ -239,7 +237,7 @@ def main() -> int:
     ]:
         betas = _load_betas(path)
         if not auto_defaults:
-            betas = _subsample(betas, args.sample_ratio, args.seed)
+            betas = _subsample(betas, forced_ratio, args.seed)
         var_score = _variation_score(betas)
         ent_score = _entropy_score(betas, bins=args.entropy_bins)
         metrics[label] = (var_score, ent_score)

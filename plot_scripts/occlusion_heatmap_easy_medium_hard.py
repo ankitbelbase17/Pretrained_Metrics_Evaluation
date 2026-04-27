@@ -8,6 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+REQUIRED_SAMPLE_RATIO = 0.2
+
+
 def _load_occ_map(npz_path: Path) -> np.ndarray:
     data = dict(np.load(npz_path, allow_pickle=True))
     if "occ_maps" not in data:
@@ -135,12 +138,6 @@ def parse_args() -> argparse.Namespace:
         default=Path("./eda_cache/curvton"),
         help="Default cache directory to resolve easy/medium/hard NPZs.",
     )
-    parser.add_argument(
-        "--sample-ratio",
-        type=float,
-        default=0.2,
-        help="Sample ratio to apply when using full caches (default: 0.2 = 20%%).",
-    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/occlusion_easy_medium_hard"))
     parser.add_argument("--stem", type=str, default="occlusion_heatmap_easy_medium_hard")
@@ -161,10 +158,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    forced_ratio = REQUIRED_SAMPLE_RATIO
 
     auto_defaults = False
     if args.easy is None and args.medium is None and args.hard is None:
-        pct = int(round(args.sample_ratio * 100))
+        pct = int(round(forced_ratio * 100))
         args.easy = args.cache_dir / f"curvton_easy_{pct}pct.npz"
         args.medium = args.cache_dir / f"curvton_medium_{pct}pct.npz"
         args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
@@ -182,7 +180,7 @@ def main() -> int:
 
     if not auto_defaults:
         maps_by_label = {
-            k: _subsample_maps(v, args.sample_ratio, args.seed) for k, v in maps_by_label.items()
+            k: _subsample_maps(v, forced_ratio, args.seed) for k, v in maps_by_label.items()
         }
 
     if args.vmax < 0:
