@@ -214,16 +214,69 @@ def cluster_embeddings(embeddings: np.ndarray, n_clusters: int, seed: int) -> np
     return kmeans.fit_predict(embeddings)
 
 
-def cluster_label_text(cloth_names: Sequence[str], cluster_ids: np.ndarray, top_n_terms: int = 2) -> Dict[int, str]:
+def cloth_name_to_semantic_class(name: str) -> str:
+    """Map garment names to mid-level semantic classes (broad, but informative)."""
+    n = name.lower().replace("_", " ").replace("-", " ")
+
+    keyword_groups: List[Tuple[str, Tuple[str, ...]]] = [
+        ("South Asian Traditions", (
+            "sari", "saree", "jamdani", "kurta", "kurung", "qipao", "kalash", "kashta", "lehenga", "ajrak"
+        )),
+        ("MENA Traditions", (
+            "thobe", "kandura", "dishdasha", "djellaba", "ghutra", "keffiyeh", "shemagh", "abaya"
+        )),
+        ("East Asian Traditions", (
+            "hanfu", "hanbok", "montsuki", "hakama", "ao ba ba", "shenyi"
+        )),
+        ("African/Indigenous Traditions", (
+            "kente", "tuareg", "naga", "cholita", "ewe", "atlas"
+        )),
+        ("Ceremonial/Heritage Wear", (
+            "barong", "ta'ovala", "taov", "poncho", "angrakha", "churidar"
+        )),
+        ("Tailored & Formal", (
+            "suit", "blazer", "guayabera", "formal", "office"
+        )),
+        ("Dresses & One-Piece", (
+            "dress", "gown", "playsuit", "jumpsuit", "slip", "a line", "wrap"
+        )),
+        ("Bottomwear & Separates", (
+            "jeans", "chinos", "shorts", "skirt", "maxi", "pants", "trousers"
+        )),
+        ("Contemporary Casual", (
+            "streetwear", "sweater", "set", "shirt", "top"
+        )),
+    ]
+
+    for cls, keywords in keyword_groups:
+        if any(k in n for k in keywords):
+            return cls
+    return "Mixed Global Styles"
+
+
+def cluster_label_text(cloth_names: Sequence[str], cluster_ids: np.ndarray) -> Dict[int, str]:
     labels: Dict[int, str] = {}
     for c in sorted(set(cluster_ids.tolist())):
         names = [cloth_names[i] for i in range(len(cloth_names)) if int(cluster_ids[i]) == c]
-        cnt = Counter(names)
-        top_terms = [name for name, _ in cnt.most_common(top_n_terms)]
-        if top_terms:
-            labels[c] = " / ".join(top_terms)
+        classes = [cloth_name_to_semantic_class(n) for n in names]
+        cnt = Counter(classes)
+        top = cnt.most_common(2)
+
+        if top:
+            top_name, top_count = top[0]
+            if len(top) > 1:
+                second_name, second_count = top[1]
+                top_share = top_count / max(1, len(classes))
+                second_share = second_count / max(1, len(classes))
+                # Keep moderately broad labels: mixed label only when genuinely blended.
+                if top_share < 0.62 and second_share >= 0.22:
+                    labels[c] = f"{top_name} + {second_name}"
+                else:
+                    labels[c] = top_name
+            else:
+                labels[c] = top_name
         else:
-            labels[c] = f"cluster_{c}"
+            labels[c] = "Mixed Global Styles"
     return labels
 
 
@@ -241,6 +294,7 @@ def place_non_overlapping_annotations(
     label_texts: Dict[int, str],
     cluster_sizes: Dict[int, int],
     max_labels: int,
+    min_points_to_label: int,
 ) -> None:
     """
     Add sparse cluster labels with greedy collision avoidance in data space.
@@ -256,6 +310,9 @@ def place_non_overlapping_annotations(
     min_dy = 0.07 * span_y
 
     ranked = sorted(cluster_sizes.items(), key=lambda kv: kv[1], reverse=True)
+    ranked = [(c, s) for c, s in ranked if s >= min_points_to_label]
+    if not ranked:
+        ranked = sorted(cluster_sizes.items(), key=lambda kv: kv[1], reverse=True)
     ranked = ranked[:max_labels]
 
     placed: List[Tuple[float, float]] = []
@@ -295,7 +352,7 @@ def place_non_overlapping_annotations(
             label_texts.get(c, f"cluster_{c}"),
             xy=(bx, by),
             xytext=(found_x, found_y),
-            fontsize=9,
+            fontsize=8,
             ha="center",
             va="center",
             bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "alpha": 0.86, "edgecolor": "#666"},
@@ -330,6 +387,7 @@ def plot_clustered_tsne(
     out_dir: Path,
     stem: str,
     max_labels: int,
+    min_cluster_fraction_for_label: float,
 ) -> Tuple[Path, Path]:
     _eccv_axes_style()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -363,12 +421,23 @@ def plot_clustered_tsne(
 
     cluster_sizes = {c: int(np.sum(cluster_arr == c)) for c in unique_clusters}
     centroids = compute_centroids(coords_arr, cluster_arr)
-    label_texts = cluster_label_text(cloth_names, cluster_arr, top_n_terms=2)
-    place_non_overlapping_annotations(ax, centroids, label_texts, cluster_sizes, max_labels=max_labels)
+    label_texts = cluster_label_text(cloth_names, cluster_arr)
+    min_points = max(6, int(round(len(cloth_names) * min_cluster_fraction_for_label)))
+    place_non_overlapping_annotations(
+        ax,
+        centroids,
+        label_texts,
+        cluster_sizes,
+        max_labels=max_labels,
+        min_points_to_label=min_points,
+    )
 
-    ax.set_title("Multimodal Garment Clusters (t-SNE)", pad=12)
-    ax.set_xlabel("t-SNE Dimension 1")
-    ax.set_ylabel("t-SNE Dimension 2")
+    ax.set_title("")
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
 
     total = len(cloth_names)
     n_unique_names = len(set(cloth_names))
@@ -454,7 +523,13 @@ def parse_args() -> argparse.Namespace:
         help="Weight for image branch in fusion. Text branch weight is (1-alpha).",
     )
     parser.add_argument("--n-clusters", type=int, default=10)
-    parser.add_argument("--max-labels", type=int, default=10)
+    parser.add_argument("--max-labels", type=int, default=8)
+    parser.add_argument(
+        "--min-cluster-fraction-for-label",
+        type=float,
+        default=0.05,
+        help="Only annotate clusters with at least this fraction of samples (reduces label crowding).",
+    )
     parser.add_argument("--tsne-perplexity", type=float, default=30.0)
     parser.add_argument(
         "--device",
@@ -534,6 +609,7 @@ def main() -> int:
         out_dir=args.out_dir,
         stem="garment_multimodal_clustered_tsne",
         max_labels=args.max_labels,
+        min_cluster_fraction_for_label=args.min_cluster_fraction_for_label,
     )
 
     print("Saved plots:")

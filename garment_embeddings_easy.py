@@ -206,9 +206,12 @@ def plot_projection(
             label=f"{gender.capitalize()} cloth (n={int(mask.sum())})",
         )
 
-    ax.set_title(f"Garment CLIP Embedding Space ({method_name})", pad=12)
-    ax.set_xlabel(f"{method_name} Dimension 1")
-    ax.set_ylabel(f"{method_name} Dimension 2")
+    ax.set_title("")
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
 
     total = len(genders)
     ax.text(
