@@ -11,6 +11,11 @@ Metric 1 — Pose Diversity & Pose Articulation Complexity
 1B. Pose Articulation Complexity (C_artic)
     Sum of joint-angle variances across a predefined set of limb triplets.
 
+1C. Pose Uncertainty (U_pose)
+    Mean missing-keypoint ratio per image.
+    Images with fewer reliably detected keypoints contribute slightly to
+    combined diversity/complexity.
+
 Pretrained model
 -----------------
 OpenMMLab MMPose ViTPose + person detector (primary),
@@ -68,6 +73,14 @@ IDX_L_SHOULDER = J2I["left_shoulder"]
 IDX_R_SHOULDER = J2I["right_shoulder"]
 IDX_L_HIP      = J2I["left_hip"]
 IDX_R_HIP      = J2I["right_hip"]
+
+# End-effectors used for position-based pose components
+END_EFFECTOR_IDXS = [
+    J2I["left_wrist"],
+    J2I["right_wrist"],
+    J2I["left_ankle"],
+    J2I["right_ankle"],
+]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -270,12 +283,32 @@ class PoseMetrics:
       - C_artic = Σ_limbs Var(θ_limb)
     """
 
-    def __init__(self, device: str = "cpu", eps: float = 1e-6):
+    def __init__(
+        self,
+        device: str = "cpu",
+        eps: float = 1e-6,
+        diversity_w_angle: float = 0.6,
+        diversity_w_end_effector: float = 0.3,
+        diversity_w_uncertainty: float = 0.1,
+        complexity_w_angle: float = 0.6,
+        complexity_w_end_effector: float = 0.3,
+        complexity_w_uncertainty: float = 0.1,
+    ):
         self.extractor = _KeypointExtractor(device=device)
         self.eps = eps
+        self.diversity_w_angle = float(diversity_w_angle)
+        self.diversity_w_end_effector = float(diversity_w_end_effector)
+        self.diversity_w_uncertainty = float(diversity_w_uncertainty)
+        self.complexity_w_angle = float(complexity_w_angle)
+        self.complexity_w_end_effector = float(complexity_w_end_effector)
+        self.complexity_w_uncertainty = float(complexity_w_uncertainty)
         self._pose_vecs: List[np.ndarray]     = []   # (34,) vectors
         self._all_angles: Dict[int, List[float]] = {t: [] for t in range(len(TRIPLET_IDX))}
+        self._angle_vecs: List[np.ndarray] = []      # (num_triplets,) per image, NaN for missing
+        self._end_eff_vecs: List[np.ndarray] = []    # (len(END_EFFECTOR_IDXS)*2,) per image
         self._per_image_artic: List[float]    = []
+        self._per_image_end_eff_complexity: List[float] = []
+        self._per_image_uncertainty: List[float] = []
 
     # ------------------------------------------------------------------ #
     def update(self, person_imgs: torch.Tensor):
@@ -290,6 +323,11 @@ class PoseMetrics:
             pn = kps_norm[i]   # (17, 2)
             vk = valid_kp[i]   # (17,)
 
+            # Uncertainty score in [0, 1]: higher means less reliable detection.
+            valid_ratio = float(np.mean(vk.astype(np.float32)))
+            uncertainty = 1.0 - valid_ratio
+            self._per_image_uncertainty.append(float(np.clip(uncertainty, 0.0, 1.0)))
+
             # ── Pose vector ─────────────────────────────────────────────
             # Keep fixed-size representation; invalid keypoints remain zeros.
             if int(vk.sum()) > 0:
@@ -297,13 +335,36 @@ class PoseMetrics:
 
             # ── Joint angles ─────────────────────────────────────────────
             img_angles = []
+            angle_vec = np.full((len(TRIPLET_IDX),), np.nan, dtype=np.float32)
             for t_idx, (ia, ib, ic) in enumerate(TRIPLET_IDX):
                 if not (vk[ia] and vk[ib] and vk[ic]):
                     continue
                 ang = _joint_angle(pn[ia], pn[ib], pn[ic])
                 if not math.isnan(ang):
-                    self._all_angles[t_idx].append(ang)
-                    img_angles.append(ang)
+                    bend = float(np.abs(ang - math.pi))
+                    self._all_angles[t_idx].append(bend)
+                    img_angles.append(bend)
+                    angle_vec[t_idx] = bend
+
+            self._angle_vecs.append(angle_vec)
+
+            # ── End-effector positions ───────────────────────────────────
+            end_pts = []
+            for idx in END_EFFECTOR_IDXS:
+                if vk[idx]:
+                    end_pts.append(pn[idx])
+                else:
+                    end_pts.append(np.array([0.0, 0.0], dtype=np.float32))
+            end_arr = np.stack(end_pts, axis=0).astype(np.float32)  # (4,2)
+            self._end_eff_vecs.append(end_arr.reshape(-1))
+
+            valid_end_pts = [pn[idx] for idx in END_EFFECTOR_IDXS if vk[idx]]
+            if len(valid_end_pts) >= 2:
+                ve = np.stack(valid_end_pts, axis=0)
+                # Position-based articulation: spread among end-effectors in an image.
+                self._per_image_end_eff_complexity.append(float(np.sqrt(np.var(ve[:, 0]) + np.var(ve[:, 1]))))
+            else:
+                self._per_image_end_eff_complexity.append(float("nan"))
 
             # Per-image articulation = std of all valid angles
             if img_angles:
@@ -330,11 +391,33 @@ class PoseMetrics:
         if len(self._pose_vecs) < 2:
             return {
                 "pose_diversity": float("nan"),
+                "pose_diversity_angle": float("nan"),
+                "pose_diversity_end_effector": float("nan"),
+                "pose_diversity_uncertainty": float("nan"),
+                "pose_diversity_weight_angle": self.diversity_w_angle,
+                "pose_diversity_weight_end_effector": self.diversity_w_end_effector,
+                "pose_diversity_weight_uncertainty": self.diversity_w_uncertainty,
                 "pose_artic_complexity": float("nan"),
+                "pose_artic_complexity_angle": float("nan"),
+                "pose_artic_complexity_end_effector": float("nan"),
+                "pose_artic_complexity_uncertainty": float("nan"),
+                "pose_artic_weight_angle": self.complexity_w_angle,
+                "pose_artic_weight_end_effector": self.complexity_w_end_effector,
+                "pose_artic_weight_uncertainty": self.complexity_w_uncertainty,
+                "pose_uncertainty_mean": float("nan"),
                 "pose_artic_mean_per_image": float("nan"),
             }
 
-        # 1A — Diversity
+        def _weighted_average(parts: List[tuple[float, float]]) -> float:
+            vals = [(v, w) for v, w in parts if not math.isnan(v) and w > 0.0]
+            if not vals:
+                return float("nan")
+            wsum = float(sum(w for _, w in vals))
+            if wsum <= 0.0:
+                return float("nan")
+            return float(sum(v * w for v, w in vals) / wsum)
+
+        # 1A — Diversity (existing pose-vector metric)
         V   = np.stack(self._pose_vecs, axis=0).astype(np.float64)    # (N, D)
         D   = V.shape[1]
         mu  = V.mean(axis=0, keepdims=True)
@@ -345,26 +428,89 @@ class PoseMetrics:
         d_pose = float(log_det) if sign > 0 else float("nan")
         d_pose_norm = (d_pose / D) if (not math.isnan(d_pose) and D > 0) else float("nan")
 
-        # 1B — Complexity (Absolute magnitude per sample, NOT dataset variance)
-        c_artic = 0.0
+        # 1A-angle — Diversity from joint-angle vectors
+        A = np.stack(self._angle_vecs, axis=0).astype(np.float64)  # (N, T)
+        for j in range(A.shape[1]):
+            col = A[:, j]
+            mask = np.isfinite(col)
+            if np.any(mask):
+                fill = float(np.mean(col[mask]))
+                col[~mask] = fill
+            else:
+                col[:] = 0.0
+            A[:, j] = col
+
+        Tdim = A.shape[1]
+        Ac = A - A.mean(axis=0, keepdims=True)
+        cov_a = (Ac.T @ Ac) / max(len(A) - 1, 1)
+        reg_a = cov_a + self.eps * np.eye(Tdim)
+        sign_a, log_det_a = np.linalg.slogdet(reg_a)
+        d_pose_angle = float(log_det_a / Tdim) if (sign_a > 0 and Tdim > 0) else float("nan")
+
+        # 1A-eff — Diversity from end-effector positions
+        E = np.stack(self._end_eff_vecs, axis=0).astype(np.float64)  # (N, 8)
+        Edim = E.shape[1]
+        Ec = E - E.mean(axis=0, keepdims=True)
+        cov_e = (Ec.T @ Ec) / max(len(E) - 1, 1)
+        reg_e = cov_e + self.eps * np.eye(Edim)
+        sign_e, log_det_e = np.linalg.slogdet(reg_e)
+        d_pose_end_eff = float(log_det_e / Edim) if (sign_e > 0 and Edim > 0) else float("nan")
+
+        unc_arr = np.array(self._per_image_uncertainty, dtype=np.float64)
+        d_pose_uncertainty = float(np.mean(unc_arr)) if unc_arr.size > 0 else float("nan")
+
+        d_pose_combined = _weighted_average([
+            (d_pose_angle, self.diversity_w_angle),
+            (d_pose_end_eff, self.diversity_w_end_effector),
+            (d_pose_uncertainty, self.diversity_w_uncertainty),
+        ])
+
+        # 1B-angle — Complexity from joint angles
+        c_artic_angle = 0.0
         valid_limbs = 0
         for t_idx in range(len(TRIPLET_IDX)):
             angles = self._all_angles[t_idx]
             if len(angles) > 0:
-                # Average angle (how bent the limb is)
-                c_artic += float(np.mean(np.abs(np.array(angles) - math.pi))) # Deviation from straight (pi)
+                # Angles are already stored as absolute bend magnitudes |theta - pi|.
+                c_artic_angle += float(np.mean(np.array(angles)))
                 valid_limbs += 1
         
         if valid_limbs > 0:
-            c_artic = c_artic / valid_limbs
+            c_artic_angle = c_artic_angle / valid_limbs
+
+        # 1B-eff — Complexity from end-effector spatial spread
+        eff_per_image = [v for v in self._per_image_end_eff_complexity if not math.isnan(v)]
+        c_artic_end_eff = float(np.mean(eff_per_image)) if eff_per_image else float("nan")
+
+        c_artic_uncertainty = d_pose_uncertainty
+
+        c_artic_combined = _weighted_average([
+            (c_artic_angle, self.complexity_w_angle),
+            (c_artic_end_eff, self.complexity_w_end_effector),
+            (c_artic_uncertainty, self.complexity_w_uncertainty),
+        ])
 
         artic_per_image = [v for v in self._per_image_artic if not math.isnan(v)]
 
         return {
-            "pose_diversity":            d_pose,
+            # Backward-compatible main keys now represent weighted combined variants.
+            "pose_diversity":            d_pose_combined,
             "pose_diversity_logdet_raw": d_pose,
             "pose_diversity_logdet_normalized": d_pose_norm,
-            "pose_artic_complexity":     c_artic,
+            "pose_diversity_angle":      d_pose_angle,
+            "pose_diversity_end_effector": d_pose_end_eff,
+            "pose_diversity_uncertainty": d_pose_uncertainty,
+            "pose_diversity_weight_angle": self.diversity_w_angle,
+            "pose_diversity_weight_end_effector": self.diversity_w_end_effector,
+            "pose_diversity_weight_uncertainty": self.diversity_w_uncertainty,
+            "pose_artic_complexity":     c_artic_combined,
+            "pose_artic_complexity_angle": c_artic_angle,
+            "pose_artic_complexity_end_effector": c_artic_end_eff,
+            "pose_artic_complexity_uncertainty": c_artic_uncertainty,
+            "pose_artic_weight_angle": self.complexity_w_angle,
+            "pose_artic_weight_end_effector": self.complexity_w_end_effector,
+            "pose_artic_weight_uncertainty": self.complexity_w_uncertainty,
+            "pose_uncertainty_mean": d_pose_uncertainty,
             "pose_artic_mean_per_image": float(np.mean(artic_per_image)) if artic_per_image else float("nan"),
         }
 
@@ -372,4 +518,8 @@ class PoseMetrics:
         self._pose_vecs.clear()
         for k in self._all_angles:
             self._all_angles[k].clear()
+        self._angle_vecs.clear()
+        self._end_eff_vecs.clear()
         self._per_image_artic.clear()
+        self._per_image_end_eff_complexity.clear()
+        self._per_image_uncertainty.clear()
