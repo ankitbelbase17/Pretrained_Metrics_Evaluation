@@ -139,6 +139,15 @@ def _run_eric_6(
     print(f"\n  ✓  All 6 Eric plots → {P.resolve()}\n")
 
 
+def run_eric_6(
+    all_data: Dict[str, dict],
+    out_dir: str,
+    tag: str = "",
+):
+    """Public wrapper for generating Eric's 6 required plots."""
+    _run_eric_6(all_data, out_dir=out_dir, tag=tag)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Data loading helpers
 # ═══════════════════════════════════════════════════════════════════════════════
