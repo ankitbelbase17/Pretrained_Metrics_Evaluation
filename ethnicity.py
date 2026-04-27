@@ -39,18 +39,43 @@ class SD15CLIPImageEmbedder:
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.model = CLIPModel.from_pretrained(model_id).to(device).eval()
 
+    def _extract_image_features(self, inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Return image embeddings as a tensor across transformers versions."""
+        out = self.model.get_image_features(**inputs)
+        if torch.is_tensor(out):
+            return out
+
+        # Some versions may return a model output object.
+        if hasattr(out, "image_embeds") and torch.is_tensor(out.image_embeds):
+            return out.image_embeds
+        if hasattr(out, "pooler_output") and torch.is_tensor(out.pooler_output):
+            return out.pooler_output
+        if hasattr(out, "last_hidden_state") and torch.is_tensor(out.last_hidden_state):
+            # Mean pool as a robust fallback if only token features are exposed.
+            return out.last_hidden_state.mean(dim=1)
+
+        # Final fallback: run vision branch directly and apply visual projection when available.
+        vision_out = self.model.vision_model(pixel_values=inputs["pixel_values"])
+        pooled = vision_out.pooler_output
+        if hasattr(self.model, "visual_projection"):
+            pooled = self.model.visual_projection(pooled)
+        return pooled
+
     @torch.no_grad()
     def encode_images(self, image_paths: Sequence[Path], batch_size: int = 32) -> np.ndarray:
         all_embeddings: List[np.ndarray] = []
 
         for start in tqdm(range(0, len(image_paths), batch_size), desc="Encoding CLIP embeddings"):
             batch_paths = image_paths[start : start + batch_size]
-            images = [Image.open(p).convert("RGB") for p in batch_paths]
+            images: List[Image.Image] = []
+            for p in batch_paths:
+                with Image.open(p) as im:
+                    images.append(im.convert("RGB"))
 
             inputs = self.processor(images=images, return_tensors="pt")
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            feats = self.model.get_image_features(**inputs)
+            feats = self._extract_image_features(inputs)
             feats = F.normalize(feats.float(), dim=-1)
             all_embeddings.append(feats.cpu().numpy().astype(np.float32))
 
