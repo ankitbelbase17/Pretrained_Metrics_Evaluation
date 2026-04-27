@@ -182,22 +182,29 @@ class _CameraAngleBackend:
 
         Returns:
             dict with:
-                azimuth: (B,) horizontal angle in degrees [-180, 180]
+                azimuth: (B,) horizontal angle in degrees [0, 360)
                 elevation: (B,) vertical angle in degrees [-90, 90]
                 confidence: (B,) confidence score [0, 1]
         """
         imgs = imgs.to(self.device)
         B, C, H, W = imgs.shape
 
+        angles: Dict[str, torch.Tensor]
         if self._backend == "hmr2":
-            return self._hmr2_angles(imgs, H, W)
+            angles = self._hmr2_angles(imgs, H, W)
         elif self._backend == "vitpose":
-            return self._vitpose_angles(imgs, H, W)
+            angles = self._vitpose_angles(imgs, H, W)
         elif self._backend == "keypointrcnn":
-            return self._keypointrcnn_angles(imgs, H, W)
+            angles = self._keypointrcnn_angles(imgs, H, W)
         elif self._backend == "dino":
-            return self._dino_angles(imgs, H, W)
-        raise RuntimeError("[CameraAngle] No valid camera-angle backend available.")
+            angles = self._dino_angles(imgs, H, W)
+        else:
+            raise RuntimeError("[CameraAngle] No valid camera-angle backend available.")
+
+        # Use canonical azimuth representation for all downstream metrics/EDA.
+        if "azimuth" in angles:
+            angles["azimuth"] = torch.remainder(angles["azimuth"], 360.0)
+        return angles
 
     # --------------------------------------------------------------------- #
     def _hmr2_angles(self, imgs: torch.Tensor, H: int, W: int):
@@ -328,7 +335,7 @@ class _CameraAngleBackend:
             R: (B, 3, 3) rotation matrix
 
         Returns:
-            azimuth: (B,) in degrees [-180, 180]
+            azimuth: (B,) in degrees [0, 360)
             elevation: (B,) in degrees [-90, 90]
         """
         # Extract Euler angles (Y-X-Z convention)
@@ -730,9 +737,12 @@ class CameraAngleMetrics:
                 "side_ratio": float("nan"),
             }
 
-        az_arr = np.array(self._azimuths)
+        az_arr = np.mod(np.array(self._azimuths), 360.0)
         el_arr = np.array(self._elevations)
         conf_arr = np.array(self._confidences)
+
+        # Signed view of azimuths is used for symmetric category thresholds.
+        az_signed = ((az_arr + 180.0) % 360.0) - 180.0
 
         # ── Basic statistics ──────────────────────────────────────────────────
         az_mean = float(np.mean(az_arr))
@@ -742,7 +752,7 @@ class CameraAngleMetrics:
 
         # ── Azimuth entropy (diversity measure) ───────────────────────────────
         # Bin azimuths into n_bins sectors
-        bin_edges = np.linspace(-180, 180, self._n_bins + 1)
+        bin_edges = np.linspace(0, 360, self._n_bins + 1)
         hist, _ = np.histogram(az_arr, bins=bin_edges, density=True)
         hist = hist + 1e-10  # Avoid log(0)
         hist = hist / hist.sum()  # Normalize
@@ -753,12 +763,13 @@ class CameraAngleMetrics:
         normalized_entropy = entropy / max_entropy  # [0, 1]
 
         # ── View categorization ───────────────────────────────────────────────
+        # Use signed equivalent azimuth in [-180, 180) for view categories:
         # Frontal: |azimuth| < 30°
         # Side: 60° < |azimuth| < 120°
         # Back: |azimuth| > 150°
-        frontal_mask = np.abs(az_arr) < 30
-        side_mask = (np.abs(az_arr) > 60) & (np.abs(az_arr) < 120)
-        back_mask = np.abs(az_arr) > 150
+        frontal_mask = np.abs(az_signed) < 30
+        side_mask = (np.abs(az_signed) > 60) & (np.abs(az_signed) < 120)
+        back_mask = np.abs(az_signed) > 150
 
         n_total = len(az_arr)
         frontal_ratio = float(frontal_mask.sum() / n_total)
