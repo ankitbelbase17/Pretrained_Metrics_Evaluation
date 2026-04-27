@@ -118,6 +118,30 @@ def maybe_limit_per_class(samples: Sequence[Sample], limit_per_class: int, seed:
     return out
 
 
+def sample_by_ratio_per_class(samples: Sequence[Sample], sample_ratio: float, seed: int) -> List[Sample]:
+    """Stratified sampling by class label using a fixed ratio in (0, 1]."""
+    if sample_ratio >= 1.0:
+        return list(samples)
+    if sample_ratio <= 0.0:
+        raise ValueError("sample_ratio must be > 0")
+
+    rng = np.random.default_rng(seed)
+    out: List[Sample] = []
+
+    for label in ("female", "male"):
+        cls = [s for s in samples if s.label == label]
+        if not cls:
+            continue
+
+        n_keep = max(1, int(round(len(cls) * sample_ratio)))
+        n_keep = min(n_keep, len(cls))
+        idx = rng.choice(len(cls), size=n_keep, replace=False)
+        idx_sorted = np.sort(idx)
+        out.extend([cls[i] for i in idx_sorted])
+
+    return out
+
+
 def run_tsne(embeddings: np.ndarray, seed: int, perplexity: float) -> np.ndarray:
     n = embeddings.shape[0]
     p = min(perplexity, max(5.0, (n - 1) / 3.0))
@@ -262,6 +286,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--sample-ratio",
+        type=float,
+        default=0.4,
+        help="Fraction of each class to use (default: 0.4 = 40%%).",
+    )
+    parser.add_argument(
         "--limit-per-class",
         type=int,
         default=0,
@@ -300,11 +330,16 @@ def main() -> int:
             "Expected dataset tree: root/female/*.png and root/male/*.png"
         )
 
+    if not (0.0 < args.sample_ratio <= 1.0):
+        raise ValueError("--sample-ratio must be in (0, 1].")
+
+    samples = sample_by_ratio_per_class(samples, args.sample_ratio, args.seed)
     samples = maybe_limit_per_class(samples, args.limit_per_class, args.seed)
     image_paths = [s.image_path for s in samples]
     labels = [s.label for s in samples]
 
     print(f"Found {len(samples)} images total")
+    print(f"Sampling ratio per class: {args.sample_ratio:.0%}")
     print(f"  Female: {sum(1 for x in labels if x == 'female')}")
     print(f"  Male:   {sum(1 for x in labels if x == 'male')}")
     print(f"Using device: {args.device}")
