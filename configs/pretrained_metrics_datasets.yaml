@@ -23,19 +23,6 @@ defaults:
   run_garment: true
 
 datasets:
-  - name: curvton
-    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test
-    split: test
-  - name: curvton
-    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/easy
-    split: test
-  - name: curvton
-    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/medium
-    split: test
-  - name: curvton
-    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/hard
-    split: test
-
   # Qwen camera-edit control generation outputs
   # Computes camera metrics for all difficulties and per-difficulty subsets.
   - name: qwen_camera_results
@@ -86,6 +73,19 @@ datasets:
     run_garment: false
     run_vae: false
     run_camera: true
+
+  - name: curvton
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test
+    split: test
+  - name: curvton
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/easy
+    split: test
+  - name: curvton
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/medium
+    split: test
+  - name: curvton
+    root: /iopsstor/scratch/cscs/dbartaula/human_gen/dataset_v3_backup_1/dataset_ultimate_test/hard
+    split: test
 
   - name: viton_hd
     root: /iopsstor/scratch/cscs/dbartaula/human_gen/benchmark_datasets/viton_hd

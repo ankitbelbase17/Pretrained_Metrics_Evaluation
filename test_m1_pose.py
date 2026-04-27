@@ -25,6 +25,7 @@ def _probe_m1(device: str, batches: List[Dict[str, torch.Tensor]], _args) -> Tup
 def main() -> int:
     parser = argparse.ArgumentParser(description="M1 Pose metric test across all configured datasets")
     add_common_args(parser)
+    parser.set_defaults(continue_on_error=False, error_log="logs/test_m1_pose_errors.log")
     args = parser.parse_args()
     return run_metric_on_all_datasets(
         args=args,

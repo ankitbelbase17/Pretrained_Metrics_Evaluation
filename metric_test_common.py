@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import traceback
 from pathlib import Path
+from datetime import datetime
 from typing import Callable, Dict, List, Tuple
 
 import numpy as np
@@ -64,6 +65,12 @@ def add_common_args(p: argparse.ArgumentParser) -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Continue all dataset entries even if one fails (default: enabled).",
+    )
+    p.add_argument(
+        "--error_log",
+        type=str,
+        default=None,
+        help="Optional path to append dataset failure logs.",
     )
 
     # Legacy args retained for backward-compatibility with older SLURM scripts.
@@ -196,6 +203,27 @@ def run_metric_on_all_datasets(
     paper_scores: List[float] = []
 
     seen_targets = set()
+
+    def _append_error_log(entry: Dict[str, object]) -> None:
+        log_path = getattr(args, "error_log", None)
+        if not log_path:
+            return
+        try:
+            p = Path(log_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().isoformat(timespec="seconds")
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(
+                    f"[{ts}] "
+                    f"dataset={entry.get('dataset')} "
+                    f"split={entry.get('split')} "
+                    f"category={entry.get('category')} "
+                    f"root={entry.get('root')} "
+                    f"error={entry.get('error')}\n"
+                )
+        except Exception as log_e:
+            print(f"  [WARN] Could not write error log '{log_path}': {log_e}")
+
     for cfg in entries:
         targets = _expand_loader_targets(cfg)
         for dataset_name, root, split, category in targets:
@@ -243,20 +271,20 @@ def run_metric_on_all_datasets(
                     pass
             except Exception as e:
                 n_fail += 1
-                results.append(
-                    {
-                        "dataset": dataset_name,
-                        "root": root,
-                        "split": split,
-                        "category": category or "-",
-                        "status": "FAIL",
-                        "backend": "-",
-                        "images": "-",
-                        "time": "-",
-                        "paper_score": float("nan"),
-                        "error": f"{type(e).__name__}: {e}",
-                    }
-                )
+                fail_entry = {
+                    "dataset": dataset_name,
+                    "root": root,
+                    "split": split,
+                    "category": category or "-",
+                    "status": "FAIL",
+                    "backend": "-",
+                    "images": "-",
+                    "time": "-",
+                    "paper_score": float("nan"),
+                    "error": f"{type(e).__name__}: {e}",
+                }
+                results.append(fail_entry)
+                _append_error_log(fail_entry)
                 print(f"  {_r('FAIL')} {type(e).__name__}: {e}")
                 if args.verbose:
                     traceback.print_exc()
