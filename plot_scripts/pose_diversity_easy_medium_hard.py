@@ -19,7 +19,7 @@ from curvton_cache_autogen import (
 )
 
 
-REQUIRED_SAMPLE_RATIO = 0.1
+REQUIRED_SAMPLE_RATIO = 0.05
 
 
 def _apply_eccv_style() -> None:
