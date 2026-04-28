@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_curvton_caches
 
 
-REQUIRED_SAMPLE_RATIO = 0.2
+REQUIRED_SAMPLE_RATIO = 0.1
 
 
 def _apply_eccv_style() -> None:
