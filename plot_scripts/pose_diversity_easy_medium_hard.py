@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import Dict, Tuple
+import sys
 
 import numpy as np
 import matplotlib.pyplot as plt

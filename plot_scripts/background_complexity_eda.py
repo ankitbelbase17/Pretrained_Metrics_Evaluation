@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple
+import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,6 +17,8 @@ REQUIRED_SAMPLE_RATIO = 0.2
 
 
 _ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 
 def _apply_eccv_style() -> None:
