@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import os
+
+# Limit BLAS thread counts early to avoid OpenBLAS over-threading crashes.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "32")
+os.environ.setdefault("MKL_NUM_THREADS", "32")
+os.environ.setdefault("OMP_NUM_THREADS", "32")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "32")
+
 import argparse
 from collections import Counter
 from dataclasses import dataclass

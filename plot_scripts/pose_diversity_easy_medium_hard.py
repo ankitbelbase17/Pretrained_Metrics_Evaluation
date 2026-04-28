@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -171,7 +173,46 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/pose_diversity"))
     parser.add_argument("--stem", type=str, default="pose_diversity_easy_medium_hard")
     parser.add_argument("--no-legend", action="store_true", help="Disable legend for minimal text.")
+    parser.add_argument(
+        "--no-auto-generate",
+        action="store_true",
+        help="Disable auto-generation of missing CurvTON caches.",
+    )
     return parser.parse_args()
+
+
+def _generate_curvton_caches(cache_dir: Path, sample_ratio: float) -> None:
+    try:
+        from config import get_root
+    except Exception as exc:
+        raise RuntimeError("Failed to import config.get_root for CurvTON base path") from exc
+
+    base_path = Path(get_root("curvton"))
+    if not base_path.exists():
+        raise FileNotFoundError(f"CurvTON base path not found: {base_path}")
+
+    out_dir = Path("./outputs/curvton_eda_autogen")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable,
+        str(Path("EDA") / "run_curvton_eda.py"),
+        "--base_path",
+        str(base_path),
+        "--out_dir",
+        str(out_dir),
+        "--cache_dir",
+        str(cache_dir),
+        "--sample_ratio",
+        str(sample_ratio),
+        "--difficulties",
+        "easy",
+        "medium",
+        "hard",
+    ]
+    print("[auto] Generating CurvTON caches via:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
 
 
 def main() -> int:
@@ -186,9 +227,16 @@ def main() -> int:
         args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
         auto_defaults = True
 
-    for p in [args.easy, args.medium, args.hard]:
-        if p is None or not p.exists():
-            raise FileNotFoundError(f"File not found: {p}")
+    missing = [p for p in [args.easy, args.medium, args.hard] if p is None or not p.exists()]
+    if missing and not args.no_auto_generate:
+        if auto_defaults:
+            _generate_curvton_caches(args.cache_dir, forced_ratio)
+        else:
+            print("[warn] Missing cache files detected; auto-generation is only enabled for defaults.")
+
+    missing = [p for p in [args.easy, args.medium, args.hard] if p is None or not p.exists()]
+    if missing:
+        raise FileNotFoundError(f"File not found: {', '.join(str(p) for p in missing)}")
 
     metrics: Dict[str, Tuple[float, float]] = {}
     for label, path in [

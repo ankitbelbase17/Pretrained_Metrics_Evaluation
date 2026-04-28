@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -291,7 +293,46 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable legends for cleaner visuals.",
     )
+    parser.add_argument(
+        "--no-auto-generate",
+        action="store_true",
+        help="Disable auto-generation of missing CurvTON caches.",
+    )
     return parser.parse_args()
+
+
+def _generate_curvton_caches(cache_dir: Path, sample_ratio: float) -> None:
+    try:
+        from config import get_root
+    except Exception as exc:
+        raise RuntimeError("Failed to import config.get_root for CurvTON base path") from exc
+
+    base_path = Path(get_root("curvton"))
+    if not base_path.exists():
+        raise FileNotFoundError(f"CurvTON base path not found: {base_path}")
+
+    out_dir = Path("./outputs/curvton_eda_autogen")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable,
+        str(Path("EDA") / "run_curvton_eda.py"),
+        "--base_path",
+        str(base_path),
+        "--out_dir",
+        str(out_dir),
+        "--cache_dir",
+        str(cache_dir),
+        "--sample_ratio",
+        str(sample_ratio),
+        "--difficulties",
+        "easy",
+        "medium",
+        "hard",
+    ]
+    print("[auto] Generating CurvTON caches via:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
 
 
 def main() -> int:
@@ -312,6 +353,17 @@ def main() -> int:
         raise ValueError("Provide --features and --labels, or omit both to use defaults.")
     if len(args.features) != len(args.labels):
         raise ValueError("--features and --labels must have the same length")
+
+    missing = [Path(p) for p in args.features if not Path(p).exists()]
+    if missing and not args.no_auto_generate:
+        if auto_defaults:
+            _generate_curvton_caches(args.cache_dir, forced_ratio)
+        else:
+            print("[warn] Missing cache files detected; auto-generation is only enabled for defaults.")
+
+    missing = [Path(p) for p in args.features if not Path(p).exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing cache files: {', '.join(str(p) for p in missing)}")
 
     ent_data: Dict[str, np.ndarray] = {}
     obj_data: Dict[str, np.ndarray] = {}
