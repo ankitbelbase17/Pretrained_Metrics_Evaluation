@@ -14,7 +14,11 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import seaborn as sns
 
-from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_curvton_caches
+from curvton_cache_autogen import (
+    add_autogen_args,
+    caches_requiring_generation,
+    ensure_curvton_caches,
+)
 
 
 REQUIRED_SAMPLE_RATIO = 0.1
@@ -331,17 +335,22 @@ def main() -> int:
     if len(args.features) != len(args.labels):
         raise ValueError("--features and --labels must have the same length")
 
-    missing = [Path(p) for p in args.features if not Path(p).exists()]
-    if missing and auto_defaults:
-        defaults = default_cache_paths(args.cache_dir, forced_ratio)
-        missing_diffs = [diff for diff, path in defaults.items() if path in missing]
+    if auto_defaults:
+        missing_diffs = caches_requiring_generation(
+            cache_dir=args.cache_dir,
+            sample_ratio=forced_ratio,
+            difficulties=["easy", "medium", "hard"],
+            required_keys=["bg_entropy", "bg_obj_count"],
+        )
+    else:
+        missing_diffs = []
+    if missing_diffs:
         ensure_curvton_caches(
             missing_diffs,
             args,
             forced_ratio,
             required_keys=["bg_entropy", "bg_obj_count"],
         )
-        missing = [Path(p) for p in args.features if not Path(p).exists()]
     _require_cache_files([Path(p) for p in args.features])
 
     ent_data: Dict[str, np.ndarray] = {}

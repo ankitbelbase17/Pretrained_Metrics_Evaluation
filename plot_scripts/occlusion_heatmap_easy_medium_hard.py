@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, Tuple
 import sys
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -12,7 +12,11 @@ if str(_ROOT) not in sys.path:
 import numpy as np
 import matplotlib.pyplot as plt
 
-from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_curvton_caches
+from curvton_cache_autogen import (
+    add_autogen_args,
+    caches_requiring_generation,
+    ensure_curvton_caches,
+)
 
 
 REQUIRED_SAMPLE_RATIO = 0.1
@@ -186,17 +190,22 @@ def main() -> int:
         args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
         auto_defaults = True
 
-    missing = [p for p in [args.easy, args.medium, args.hard] if p is None or not p.exists()]
-    if missing and auto_defaults:
-        defaults = default_cache_paths(args.cache_dir, forced_ratio)
-        missing_diffs = [diff for diff, path in defaults.items() if path in missing]
+    if auto_defaults:
+        missing_diffs = caches_requiring_generation(
+            cache_dir=args.cache_dir,
+            sample_ratio=forced_ratio,
+            difficulties=["easy", "medium", "hard"],
+            required_keys=["occ_maps"],
+        )
+    else:
+        missing_diffs = []
+    if missing_diffs:
         ensure_curvton_caches(
             missing_diffs,
             args,
             forced_ratio,
             required_keys=["occ_maps"],
         )
-        missing = [p for p in [args.easy, args.medium, args.hard] if p is None or not p.exists()]
     _require_cache_files((args.easy, args.medium, args.hard))
 
     maps_by_label = {

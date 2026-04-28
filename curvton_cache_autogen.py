@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, List
 
+import numpy as np
 import torch
 
 
@@ -66,6 +67,36 @@ def resolve_curvton_root(curvton_root: Path | None) -> Path:
     )
 
 
+def _has_required_keys(npz_path: Path, required_keys: Iterable[str] | None) -> bool:
+    if required_keys is None:
+        return True
+    if not npz_path.exists():
+        return False
+    try:
+        with np.load(npz_path, allow_pickle=True) as data:
+            keys = set(data.files)
+    except Exception:
+        return False
+    return set(required_keys).issubset(keys)
+
+
+def caches_requiring_generation(
+    cache_dir: Path,
+    sample_ratio: float,
+    difficulties: Iterable[str],
+    required_keys: Iterable[str] | None = None,
+) -> List[str]:
+    defaults = default_cache_paths(cache_dir, sample_ratio)
+    to_generate: List[str] = []
+    for diff in difficulties:
+        path = defaults.get(diff)
+        if path is None:
+            continue
+        if not _has_required_keys(path, required_keys):
+            to_generate.append(diff)
+    return to_generate
+
+
 def ensure_curvton_caches(
     difficulties: Iterable[str],
     args: argparse.Namespace,
@@ -75,6 +106,14 @@ def ensure_curvton_caches(
     if args.no_auto_generate:
         return
     diffs = [d for d in difficulties if d]
+    if not diffs:
+        return
+    diffs = caches_requiring_generation(
+        cache_dir=args.cache_dir,
+        sample_ratio=sample_ratio,
+        difficulties=diffs,
+        required_keys=required_keys,
+    )
     if not diffs:
         return
     from generate_curvton_plot_features import generate_curvton_caches
@@ -95,6 +134,6 @@ def ensure_curvton_caches(
         device=args.device,
         garment_backend=args.garment_backend,
         sd_clip_model_id=args.sd_clip_model_id,
-        force=args.force_cache,
+        force=True,
         required_keys=required_keys,
     )
