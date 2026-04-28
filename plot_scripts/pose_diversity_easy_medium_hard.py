@@ -5,16 +5,14 @@ from pathlib import Path
 from typing import Dict, Tuple
 import sys
 
-import numpy as np
-import matplotlib.pyplot as plt
-import sys
-
-from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_curvton_caches
-
-
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_curvton_caches
 
 
 REQUIRED_SAMPLE_RATIO = 0.2

@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import sys
 
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -14,11 +18,6 @@ from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_
 
 
 REQUIRED_SAMPLE_RATIO = 0.2
-
-
-_ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
 
 
 def _apply_eccv_style() -> None:
