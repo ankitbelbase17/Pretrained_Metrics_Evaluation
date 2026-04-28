@@ -791,7 +791,13 @@ def add_stat_box(
     show_n : bool
         If True, also displays sample size n
     """
-    values = np.asarray(values).flatten()
+    try:
+        values = np.asarray(values, dtype=float).flatten()
+    except (TypeError, ValueError):
+        values = np.asarray(
+            [v for v in np.ravel(values) if isinstance(v, (int, float, np.number))],
+            dtype=float,
+        ).flatten()
     values = values[np.isfinite(values)]
     
     if len(values) == 0:

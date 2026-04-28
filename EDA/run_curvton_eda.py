@@ -87,6 +87,12 @@ def _print_rank0(msg, rank=0):
         print(msg)
 
 
+def _free_gpu() -> None:
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CURVTON-specific colors — ColorBrewer Dark2 (Maximally Distinct)
 # Teal vs Orange vs Purple — avoids perceptual confusion
@@ -297,8 +303,15 @@ def _extract_garment(loader, tf, device, batch_size, verbose, **kw):
     garment_embs = []
     for _, cloth_batch in _batched(loader, tf, batch_size, verbose, **kw):
         g = backend(cloth_batch)
+        if isinstance(g, dict):
+            if "fashion_clip" in g:
+                g = g["fashion_clip"]
+            elif "dinov2" in g:
+                g = g["dinov2"]
+            else:
+                g = next(iter(g.values()))
         for gi in g:
-            garment_embs.append(gi.astype(np.float32))
+            garment_embs.append(np.asarray(gi, dtype=np.float32))
     del backend; _free_gpu()
     if verbose:
         print(f"    [garment] Done ({len(garment_embs)} samples)")

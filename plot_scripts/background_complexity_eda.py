@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -282,12 +279,6 @@ def parse_args() -> argparse.Namespace:
         help="Default cache directory to resolve easy/medium/hard NPZs.",
     )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument(
-        "--curvton-root",
-        type=Path,
-        default=None,
-        help="CurvTON base path (overrides CURVTON_ROOT).",
-    )
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/background_eda"))
     parser.add_argument("--bins", type=int, default=40)
     parser.add_argument("--heatmap-bins", type=int, default=40)
@@ -303,53 +294,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable legends for cleaner visuals.",
     )
-    parser.add_argument(
-        "--no-auto-generate",
-        action="store_true",
-        help="Disable auto-generation of missing CurvTON caches.",
-    )
     return parser.parse_args()
 
 
-def _resolve_curvton_root(curvton_root: Path | None) -> Path:
-    if curvton_root is not None:
-        return curvton_root
-    env_root = os.getenv("CURVTON_ROOT") or os.getenv("CURVTON_BASE_PATH")
-    if env_root:
-        return Path(env_root)
-    raise RuntimeError(
-        "CurvTON base path not set. Provide --curvton-root or set CURVTON_ROOT."
-    )
-
-
-def _generate_curvton_caches(cache_dir: Path, sample_ratio: float, curvton_root: Path | None) -> None:
-    base_path = _resolve_curvton_root(curvton_root)
-    if not base_path.exists():
-        raise FileNotFoundError(f"CurvTON base path not found: {base_path}")
-
-    out_dir = Path("./outputs/curvton_eda_autogen")
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    script_path = _ROOT / "EDA" / "run_curvton_eda.py"
-    cmd = [
-        sys.executable,
-        str(script_path),
-        "--base_path",
-        str(base_path),
-        "--out_dir",
-        str(out_dir),
-        "--cache_dir",
-        str(cache_dir),
-        "--sample_ratio",
-        str(sample_ratio),
-        "--difficulties",
-        "easy",
-        "medium",
-        "hard",
-    ]
-    print("[auto] Generating CurvTON caches via:", " ".join(cmd))
-    subprocess.run(cmd, check=True, cwd=str(_ROOT))
+def _require_cache_files(paths: List[Path]) -> None:
+    missing = [p for p in paths if not p.exists()]
+    if missing:
+        missing_list = ", ".join(str(p) for p in missing)
+        raise FileNotFoundError(
+            "Missing cache files: "
+            f"{missing_list}. Generate CurvTON caches first; this script does not auto-generate them."
+        )
 
 
 def main() -> int:
@@ -371,16 +326,7 @@ def main() -> int:
     if len(args.features) != len(args.labels):
         raise ValueError("--features and --labels must have the same length")
 
-    missing = [Path(p) for p in args.features if not Path(p).exists()]
-    if missing and not args.no_auto_generate:
-        if auto_defaults:
-            _generate_curvton_caches(args.cache_dir, forced_ratio, args.curvton_root)
-        else:
-            print("[warn] Missing cache files detected; auto-generation is only enabled for defaults.")
-
-    missing = [Path(p) for p in args.features if not Path(p).exists()]
-    if missing:
-        raise FileNotFoundError(f"Missing cache files: {', '.join(str(p) for p in missing)}")
+    _require_cache_files([Path(p) for p in args.features])
 
     ent_data: Dict[str, np.ndarray] = {}
     obj_data: Dict[str, np.ndarray] = {}

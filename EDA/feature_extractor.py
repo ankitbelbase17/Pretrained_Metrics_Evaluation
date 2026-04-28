@@ -198,8 +198,8 @@ class FeatureExtractor:
         out["betas"] = b[0].astype(np.float32)
 
         # M7 – Garment
-        g = self._garment_ex(cloth_t)
-        out["garment_embs"] = g[0].astype(np.float32)
+        g = self._select_garment_embeddings(self._garment_ex(cloth_t))
+        out["garment_embs"] = np.asarray(g[0], dtype=np.float32)
 
         return out
 
@@ -362,9 +362,9 @@ class FeatureExtractor:
                 betas.append(bi.astype(np.float32))
 
             # ── M7: Garment ─────────────────────────────────────────────── #
-            g = self._garment_ex(cloth)                  # (B, D)
+            g = self._select_garment_embeddings(self._garment_ex(cloth))
             for gi in g:
-                garment_embs.append(gi.astype(np.float32))
+                garment_embs.append(np.asarray(gi, dtype=np.float32))
 
             # ── M9: Camera Angle (optional) ─────────────────────────────── #
             if self._camera_ex is not None:
@@ -403,3 +403,13 @@ class FeatureExtractor:
         np.savez_compressed(cp, **data)
         print(f"[FeatureExtractor] Cached → {cp}")
         return data
+
+    @staticmethod
+    def _select_garment_embeddings(garment_out: object) -> np.ndarray:
+        if isinstance(garment_out, dict):
+            if "fashion_clip" in garment_out:
+                return garment_out["fashion_clip"]
+            if "dinov2" in garment_out:
+                return garment_out["dinov2"]
+            return next(iter(garment_out.values()))
+        return garment_out
