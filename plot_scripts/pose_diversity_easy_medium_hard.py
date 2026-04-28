@@ -213,9 +213,10 @@ def _generate_curvton_caches(cache_dir: Path, sample_ratio: float, curvton_root:
     cache_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    script_path = _ROOT / "EDA" / "run_curvton_eda.py"
     cmd = [
         sys.executable,
-        str(Path("EDA") / "run_curvton_eda.py"),
+        str(script_path),
         "--base_path",
         str(base_path),
         "--out_dir",
@@ -230,7 +231,7 @@ def _generate_curvton_caches(cache_dir: Path, sample_ratio: float, curvton_root:
         "hard",
     ]
     print("[auto] Generating CurvTON caches via:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, cwd=str(_ROOT))
 
 
 def main() -> int:
