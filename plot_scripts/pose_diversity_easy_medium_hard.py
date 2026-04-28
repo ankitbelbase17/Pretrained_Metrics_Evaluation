@@ -6,6 +6,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
 
 
 _ROOT = Path(__file__).resolve().parents[1]
