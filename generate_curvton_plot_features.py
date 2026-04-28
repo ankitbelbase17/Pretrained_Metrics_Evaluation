@@ -34,6 +34,11 @@ from pretrained_metrics.metrics.m9_camera_angle import _CameraAngleBackend
 MASK_DS = (64, 48)
 
 
+def _free_gpu() -> None:
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def _build_tensor_loader(
     base_path: str,
     difficulty: str,
@@ -89,8 +94,10 @@ def _build_tensor_loader(
     )
 
 
-def _select_garment_embeddings(garment_out: object) -> np.ndarray:
+def _select_garment_embeddings(garment_out: object, preferred: str | None = None) -> np.ndarray:
     if isinstance(garment_out, dict):
+        if preferred in garment_out:
+            return garment_out[preferred]
         if "fashion_clip" in garment_out:
             return garment_out["fashion_clip"]
         if "dinov2" in garment_out:
@@ -99,17 +106,63 @@ def _select_garment_embeddings(garment_out: object) -> np.ndarray:
     return garment_out
 
 
+class _SDCLIPGarmentEncoder:
+    def __init__(self, model_id: str, device: str) -> None:
+        from transformers import AutoProcessor, CLIPModel
+
+        self.device = device
+        self.model = CLIPModel.from_pretrained(model_id).to(device).eval()
+        self.processor = AutoProcessor.from_pretrained(model_id)
+
+    @torch.no_grad()
+    def encode(self, cloth_imgs: torch.Tensor) -> np.ndarray:
+        import torchvision.transforms.functional as TF
+
+        pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in cloth_imgs]
+        inputs = self.processor(images=pils, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        feats = self.model.get_image_features(**inputs)
+        feats = F.normalize(feats.float(), dim=-1)
+        return feats.cpu().numpy()
+
+
+def _verify_models(device: str, garment_backend: str, sd_clip_model_id: str) -> None:
+    try:
+        _KeypointExtractor(device)
+        _SegBackend(device)
+        _PersonSegmenter(device)
+        _ObjectDetector(device)
+        _ShapeExtractor(device)
+        _CameraAngleBackend(device)
+
+        if garment_backend == "sd_clip":
+            _SDCLIPGarmentEncoder(sd_clip_model_id, device)
+        else:
+            _GarmentEncoder(device)
+    except Exception as exc:
+        raise RuntimeError(f"Model initialization failed: {exc}") from exc
+    finally:
+        _free_gpu()
+
+
 def _extract_features(
     dl: torch.utils.data.DataLoader,
     device: str,
     img_size: Tuple[int, int],
+    garment_backend: str,
+    sd_clip_model_id: str,
 ) -> Dict[str, np.ndarray]:
     pose_backend = _KeypointExtractor(device)
     seg_backend = _SegBackend(device)
     person_seg = _PersonSegmenter(device)
     obj_det = _ObjectDetector(device)
     shape_backend = _ShapeExtractor(device)
-    garment_backend = _GarmentEncoder(device)
+    garment_encoder = None
+    sd_clip_encoder = None
+    if garment_backend == "sd_clip":
+        sd_clip_encoder = _SDCLIPGarmentEncoder(sd_clip_model_id, device)
+    else:
+        garment_encoder = _GarmentEncoder(device)
     camera_backend = None
     try:
         camera_backend = _CameraAngleBackend(device)
@@ -136,7 +189,7 @@ def _extract_features(
         kps_raw = pose_backend(person)
         kps_norm, valid = _normalise_pose(kps_raw)
         for i in range(person.shape[0]):
-            if valid[i]:
+            if np.any(valid[i]):
                 pn = kps_norm[i]
                 pose_vecs.append(pn.flatten().astype(np.float32))
                 ang = [_joint_angle(pn[ia], pn[ib], pn[ic]) for ia, ib, ic in TRIPLET_IDX]
@@ -186,7 +239,13 @@ def _extract_features(
             betas.append(bi.astype(np.float32))
 
         # M7: Garment texture
-        g = _select_garment_embeddings(garment_backend(cloth))
+        if sd_clip_encoder is not None:
+            g = sd_clip_encoder.encode(cloth)
+        else:
+            preferred = None
+            if garment_backend in {"fashion_clip", "dinov2"}:
+                preferred = garment_backend
+            g = _select_garment_embeddings(garment_encoder(cloth), preferred=preferred)
         for gi in g:
             garment_embs.append(np.asarray(gi, dtype=np.float32))
 
@@ -254,6 +313,19 @@ def parse_args() -> argparse.Namespace:
         choices=["easy", "medium", "hard", "all"],
     )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--garment-backend",
+        type=str,
+        default="ensemble",
+        choices=["ensemble", "fashion_clip", "dinov2", "sd_clip"],
+        help="Garment embedding backend (sd_clip uses OpenAI CLIP like Stable Diffusion).",
+    )
+    parser.add_argument(
+        "--sd-clip-model-id",
+        type=str,
+        default="openai/clip-vit-large-patch14",
+        help="Model id to use when --garment-backend=sd_clip.",
+    )
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
 
@@ -262,6 +334,8 @@ def main() -> int:
     args = parse_args()
     if not (0.0 < args.sample_ratio <= 1.0):
         raise ValueError("--sample-ratio must be in (0, 1]")
+
+    _verify_models(args.device, args.garment_backend, args.sd_clip_model_id)
 
     pct = int(round(args.sample_ratio * 100))
 
@@ -278,7 +352,13 @@ def main() -> int:
             batch_size=args.batch_size,
             num_workers=args.num_workers,
         )
-        data = _extract_features(dl, device=args.device, img_size=tuple(args.img_size))
+        data = _extract_features(
+            dl,
+            device=args.device,
+            img_size=tuple(args.img_size),
+            garment_backend=args.garment_backend,
+            sd_clip_model_id=args.sd_clip_model_id,
+        )
         _save_cache(cache_path, data, force=args.force)
 
     return 0
