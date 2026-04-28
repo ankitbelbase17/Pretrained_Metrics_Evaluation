@@ -121,7 +121,20 @@ class _SDCLIPGarmentEncoder:
         pils = [TF.to_pil_image(img.clamp(0, 1).cpu()) for img in cloth_imgs]
         inputs = self.processor(images=pils, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        feats = self.model.get_image_features(**inputs)
+        out = self.model.get_image_features(**inputs)
+        if torch.is_tensor(out):
+            feats = out
+        elif hasattr(out, "image_embeds") and torch.is_tensor(out.image_embeds):
+            feats = out.image_embeds
+        elif hasattr(out, "pooler_output") and torch.is_tensor(out.pooler_output):
+            feats = out.pooler_output
+        elif hasattr(out, "last_hidden_state") and torch.is_tensor(out.last_hidden_state):
+            feats = out.last_hidden_state.mean(dim=1)
+        else:
+            vision_out = self.model.vision_model(pixel_values=inputs["pixel_values"])
+            feats = vision_out.pooler_output
+            if hasattr(self.model, "visual_projection"):
+                feats = self.model.visual_projection(feats)
         feats = F.normalize(feats.float(), dim=-1)
         return feats.cpu().numpy()
 
