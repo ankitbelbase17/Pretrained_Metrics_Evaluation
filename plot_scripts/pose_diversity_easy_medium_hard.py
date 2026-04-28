@@ -8,6 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 
+from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_curvton_caches
+
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -177,6 +179,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/pose_diversity"))
     parser.add_argument("--stem", type=str, default="pose_diversity_easy_medium_hard")
     parser.add_argument("--no-legend", action="store_true", help="Disable legend for minimal text.")
+    add_autogen_args(parser)
     return parser.parse_args()
 
 
@@ -186,7 +189,7 @@ def _require_cache_files(paths: Tuple[Path, ...]) -> None:
         missing_list = ", ".join(str(p) for p in missing)
         raise FileNotFoundError(
             "Missing cache files: "
-            f"{missing_list}. Generate CurvTON caches first; this script does not auto-generate them."
+            f"{missing_list}. Provide --curvton-root or pre-generate the caches."
         )
 
 
@@ -202,6 +205,17 @@ def main() -> int:
         args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
         auto_defaults = True
 
+    missing = [p for p in [args.easy, args.medium, args.hard] if p is None or not p.exists()]
+    if missing and auto_defaults:
+        defaults = default_cache_paths(args.cache_dir, forced_ratio)
+        missing_diffs = [diff for diff, path in defaults.items() if path in missing]
+        ensure_curvton_caches(
+            missing_diffs,
+            args,
+            forced_ratio,
+            required_keys=["pose_vecs", "angles"],
+        )
+        missing = [p for p in [args.easy, args.medium, args.hard] if p is None or not p.exists()]
     _require_cache_files((args.easy, args.medium, args.hard))
 
     metrics: Dict[str, Tuple[float, float]] = {}

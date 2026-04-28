@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+from typing import Dict, Iterable, List
+
+import torch
+
+
+def add_autogen_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--curvton-root",
+        type=Path,
+        default=None,
+        help="CurvTON base path (overrides CURVTON_ROOT).",
+    )
+    parser.add_argument(
+        "--no-auto-generate",
+        action="store_true",
+        help="Disable auto-generation of missing CurvTON caches.",
+    )
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--num-workers", type=int, default=8)
+    parser.add_argument("--gender", type=str, default="all", choices=["all", "male", "female"])
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--img-size", type=int, nargs=2, default=(512, 384))
+    parser.add_argument(
+        "--garment-backend",
+        type=str,
+        default="ensemble",
+        choices=["ensemble", "fashion_clip", "dinov2", "sd_clip"],
+        help="Garment embedding backend for cache generation.",
+    )
+    parser.add_argument(
+        "--sd-clip-model-id",
+        type=str,
+        default="openai/clip-vit-large-patch14",
+        help="Model id to use when --garment-backend=sd_clip.",
+    )
+    parser.add_argument(
+        "--force-cache",
+        action="store_true",
+        help="Overwrite existing cache files during auto-generation.",
+    )
+
+
+def default_cache_paths(cache_dir: Path, sample_ratio: float) -> Dict[str, Path]:
+    pct = int(round(sample_ratio * 100))
+    return {
+        "easy": cache_dir / f"curvton_easy_{pct}pct.npz",
+        "medium": cache_dir / f"curvton_medium_{pct}pct.npz",
+        "hard": cache_dir / f"curvton_hard_{pct}pct.npz",
+    }
+
+
+def resolve_curvton_root(curvton_root: Path | None) -> Path:
+    if curvton_root is not None:
+        return curvton_root
+    env_root = os.getenv("CURVTON_ROOT") or os.getenv("CURVTON_BASE_PATH")
+    if env_root:
+        return Path(env_root)
+    raise RuntimeError(
+        "CurvTON base path not set. Provide --curvton-root or set CURVTON_ROOT."
+    )
+
+
+def ensure_curvton_caches(
+    difficulties: Iterable[str],
+    args: argparse.Namespace,
+    sample_ratio: float,
+    required_keys: Iterable[str] | None = None,
+) -> None:
+    if args.no_auto_generate:
+        return
+    diffs = [d for d in difficulties if d]
+    if not diffs:
+        return
+    from generate_curvton_plot_features import generate_curvton_caches
+
+    base_path = resolve_curvton_root(args.curvton_root)
+
+    generate_curvton_caches(
+        base_path=str(base_path),
+        cache_dir=args.cache_dir,
+        sample_ratio=sample_ratio,
+        difficulties=list(diffs),
+        seed=args.seed,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        gender=args.gender,
+        max_samples=args.max_samples,
+        img_size=tuple(args.img_size),
+        device=args.device,
+        garment_backend=args.garment_backend,
+        sd_clip_model_id=args.sd_clip_model_id,
+        force=args.force_cache,
+        required_keys=required_keys,
+    )

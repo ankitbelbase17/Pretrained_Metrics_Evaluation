@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import seaborn as sns
 
+from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_curvton_caches
+
 
 REQUIRED_SAMPLE_RATIO = 0.2
 
@@ -294,6 +296,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable legends for cleaner visuals.",
     )
+    add_autogen_args(parser)
     return parser.parse_args()
 
 
@@ -303,7 +306,7 @@ def _require_cache_files(paths: List[Path]) -> None:
         missing_list = ", ".join(str(p) for p in missing)
         raise FileNotFoundError(
             "Missing cache files: "
-            f"{missing_list}. Generate CurvTON caches first; this script does not auto-generate them."
+            f"{missing_list}. Provide --curvton-root or pre-generate the caches."
         )
 
 
@@ -326,6 +329,17 @@ def main() -> int:
     if len(args.features) != len(args.labels):
         raise ValueError("--features and --labels must have the same length")
 
+    missing = [Path(p) for p in args.features if not Path(p).exists()]
+    if missing and auto_defaults:
+        defaults = default_cache_paths(args.cache_dir, forced_ratio)
+        missing_diffs = [diff for diff, path in defaults.items() if path in missing]
+        ensure_curvton_caches(
+            missing_diffs,
+            args,
+            forced_ratio,
+            required_keys=["bg_entropy", "bg_obj_count"],
+        )
+        missing = [Path(p) for p in args.features if not Path(p).exists()]
     _require_cache_files([Path(p) for p in args.features])
 
     ent_data: Dict[str, np.ndarray] = {}

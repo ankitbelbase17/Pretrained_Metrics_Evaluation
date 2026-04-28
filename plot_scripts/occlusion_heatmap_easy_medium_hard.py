@@ -7,6 +7,8 @@ from typing import Dict, List, Sequence
 import numpy as np
 import matplotlib.pyplot as plt
 
+from curvton_cache_autogen import add_autogen_args, default_cache_paths, ensure_curvton_caches
+
 
 REQUIRED_SAMPLE_RATIO = 0.2
 
@@ -156,6 +158,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable the shared colorbar for a cleaner, text-free figure.",
     )
+    add_autogen_args(parser)
     return parser.parse_args()
 
 
@@ -165,7 +168,7 @@ def _require_cache_files(paths: Tuple[Path, ...]) -> None:
         missing_list = ", ".join(str(p) for p in missing)
         raise FileNotFoundError(
             "Missing cache files: "
-            f"{missing_list}. Generate CurvTON caches first; this script does not auto-generate them."
+            f"{missing_list}. Provide --curvton-root or pre-generate the caches."
         )
 
 
@@ -181,6 +184,17 @@ def main() -> int:
         args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
         auto_defaults = True
 
+    missing = [p for p in [args.easy, args.medium, args.hard] if p is None or not p.exists()]
+    if missing and auto_defaults:
+        defaults = default_cache_paths(args.cache_dir, forced_ratio)
+        missing_diffs = [diff for diff, path in defaults.items() if path in missing]
+        ensure_curvton_caches(
+            missing_diffs,
+            args,
+            forced_ratio,
+            required_keys=["occ_maps"],
+        )
+        missing = [p for p in [args.easy, args.medium, args.hard] if p is None or not p.exists()]
     _require_cache_files((args.easy, args.medium, args.hard))
 
     maps_by_label = {
