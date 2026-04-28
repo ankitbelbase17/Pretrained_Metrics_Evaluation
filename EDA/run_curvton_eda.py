@@ -710,6 +710,14 @@ if __name__ == "__main__":
         "--force_recompute", action="store_true",
         help="Force recomputation of cached features"
     )
+    parser.add_argument(
+        "--batch_size", type=int, default=_EXTRACT_BATCH_SIZE,
+        help="Batch size for feature extraction"
+    )
+    parser.add_argument(
+        "--num_workers", type=int, default=16,
+        help="Number of DataLoader workers"
+    )
 
 
     args = parser.parse_args()
