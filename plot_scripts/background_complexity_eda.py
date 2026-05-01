@@ -196,6 +196,103 @@ def plot_object_histogram(
     plt.close(fig)
 
 
+def plot_entropy_object_bar_overall(
+    datasets_ent: Dict[str, np.ndarray],
+    datasets_obj: Dict[str, np.ndarray],
+    out_dir: Path,
+) -> None:
+    _apply_eccv_style()
+
+    all_ent = np.concatenate(list(datasets_ent.values())) if datasets_ent else np.array([])
+    all_obj = np.concatenate(list(datasets_obj.values())) if datasets_obj else np.array([])
+    all_ent = all_ent[np.isfinite(all_ent)]
+    all_obj = all_obj[np.isfinite(all_obj)]
+    if all_ent.size == 0 or all_obj.size == 0:
+        return
+
+    # Keep palette direction consistent with existing plot style.
+    ent_color = _get_palette("Easy", 0)
+    obj_color = _get_palette("Medium", 1)
+
+    fig, ax = plt.subplots(figsize=(3.8, 3.1))
+    x = np.arange(2)
+    vals = [float(all_ent.mean()), float(all_obj.mean())]
+    ax.bar(x, vals, width=0.58, color=[ent_color, obj_color], alpha=0.88)
+    ax.set_xticks(x)
+    ax.set_xticklabels(["Entropy", "Object Density"], fontsize=9, fontweight="bold")
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.tick_params(axis="x", bottom=False)
+    ax.grid(True, axis="y", linestyle="--", alpha=0.25, linewidth=0.4)
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.6)
+        spine.set_color("#cccccc")
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "bg_entropy_object_density_bar_overall")
+    plt.close(fig)
+
+
+def plot_entropy_object_bars_concat(
+    datasets_ent: Dict[str, np.ndarray],
+    datasets_obj: Dict[str, np.ndarray],
+    out_dir: Path,
+    show_legend: bool,
+) -> None:
+    _apply_eccv_style()
+
+    labels = list(datasets_ent.keys())
+    if not labels:
+        return
+
+    ent_means = []
+    obj_means = []
+    for lbl in labels:
+        ent = datasets_ent.get(lbl, np.array([], dtype=np.float32))
+        obj = datasets_obj.get(lbl, np.array([], dtype=np.float32))
+        ent = ent[np.isfinite(ent)]
+        obj = obj[np.isfinite(obj)]
+        ent_means.append(float(np.mean(ent)) if ent.size else 0.0)
+        obj_means.append(float(np.mean(obj)) if obj.size else 0.0)
+
+    x = np.arange(len(labels))
+    colors = [_get_palette(lbl, i) for i, lbl in enumerate(labels)]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.2, 3.0), dpi=150)
+
+    ax1.bar(x, ent_means, color=colors, alpha=0.88, width=0.62)
+    ax1.set_title("Background Entropy")
+    ax1.set_xlabel("Dataset Split")
+    ax1.set_ylabel("Mean Entropy")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(labels, rotation=0)
+    ax1.grid(True, axis="y", linestyle="--", alpha=0.25, linewidth=0.4)
+
+    ax2.bar(x, obj_means, color=colors, alpha=0.88, width=0.62)
+    ax2.set_title("Object Density")
+    ax2.set_xlabel("Dataset Split")
+    ax2.set_ylabel("Mean Object Count")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels, rotation=0)
+    ax2.grid(True, axis="y", linestyle="--", alpha=0.25, linewidth=0.4)
+
+    for ax in (ax1, ax2):
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.6)
+            spine.set_color("#cccccc")
+
+    if show_legend:
+        handles = [
+            Line2D([0], [0], color=colors[i], lw=6, label=labels[i]) for i in range(len(labels))
+        ]
+        fig.legend(handles=handles, loc="upper center", ncol=min(4, len(labels)), framealpha=0.95)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "bg_entropy_object_density_bars_concat")
+    plt.close(fig)
+
+
 def plot_entropy_vs_objects(
     datasets_ent: Dict[str, np.ndarray],
     datasets_obj: Dict[str, np.ndarray],
@@ -367,38 +464,7 @@ def main() -> int:
 
     show_legend = not args.no_legend
 
-    plot_entropy_histogram(ent_data, args.out_dir, bins=args.bins, show_legend=show_legend)
-    plot_object_histogram(obj_data, args.out_dir, bins=args.bins, show_legend=show_legend)
-    plot_entropy_vs_objects(ent_data, obj_data, args.out_dir, show_legend=show_legend)
-
-    # Combined density heatmap
-    all_ent = np.concatenate(list(ent_data.values())) if ent_data else np.array([])
-    all_obj = np.concatenate(list(obj_data.values())) if obj_data else np.array([])
-    vmax = args.heatmap_vmax
-    if vmax < 0 and len(all_ent) > 0:
-        h, _, _ = np.histogram2d(all_obj, all_ent, bins=args.heatmap_bins)
-        vmax = float(h.max()) if h.size else 1.0
-    plot_density_heatmap(
-        all_ent,
-        all_obj,
-        args.out_dir,
-        stem="bg_entropy_object_density_heatmap",
-        bins=args.heatmap_bins,
-        vmin=args.heatmap_vmin,
-        vmax=vmax,
-    )
-
-    # Per-dataset density heatmaps
-    for label in ent_data:
-        plot_density_heatmap(
-            ent_data[label],
-            obj_data[label],
-            args.out_dir,
-            stem=f"bg_entropy_object_density_heatmap_{label.lower().replace(' ', '_')}",
-            bins=args.heatmap_bins,
-            vmin=args.heatmap_vmin,
-            vmax=vmax,
-        )
+    plot_entropy_object_bars_concat(ent_data, obj_data, args.out_dir, show_legend=show_legend)
 
     return 0
 

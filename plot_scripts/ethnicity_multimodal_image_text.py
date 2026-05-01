@@ -366,8 +366,6 @@ def plot_multimodal_tsne(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     unique_clusters = sorted(set(cluster_ids.tolist()))
-    cmap = plt.get_cmap("tab20")
-    cluster_colors = {c: cmap(i % 20) for i, c in enumerate(unique_clusters)}
     gender_markers = {"female": "^", "male": "o", "unknown": "s"}
 
     fig, ax = plt.subplots(figsize=(10.0, 7.6), dpi=150)
@@ -375,21 +373,25 @@ def plot_multimodal_tsne(
     coords_arr = np.asarray(coords)
     cluster_arr = np.asarray(cluster_ids)
     gender_arr = np.asarray([s.gender for s in samples])
+    ethnicity_arr = np.asarray([s.ethnicity for s in samples])
+    unique_ethnicities = sorted(set(ethnicity_arr.tolist()))
+    eth_cmap = plt.get_cmap("tab20")
+    ethnicity_colors = {e: eth_cmap(i % 20) for i, e in enumerate(unique_ethnicities)}
 
-    for c in unique_clusters:
+    for eth in unique_ethnicities:
         for gender in ("female", "male", "unknown"):
-            mask = (cluster_arr == c) & (gender_arr == gender)
+            mask = (ethnicity_arr == eth) & (gender_arr == gender)
             if not np.any(mask):
                 continue
             ax.scatter(
                 coords_arr[mask, 0],
                 coords_arr[mask, 1],
-                s=18,
-                color=cluster_colors[c],
+                s=20,
+                color=ethnicity_colors[eth],
                 marker=gender_markers[gender],
-                alpha=0.68,
+                alpha=0.78,
                 edgecolors="white",
-                linewidths=0.18,
+                linewidths=0.15,
             )
 
     if show_labels:
@@ -413,7 +415,30 @@ def plot_multimodal_tsne(
             plt.Line2D([0], [0], marker="s", color="#333333", linestyle="None", markersize=6, label="Unknown")
         )
 
-    ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender")
+    ethnicity_handles = []
+    for eth in unique_ethnicities:
+        n_eth = int(np.sum(ethnicity_arr == eth))
+        ethnicity_handles.append(
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color=ethnicity_colors[eth],
+                linestyle="None",
+                markersize=5,
+                label=f"{eth} (n={n_eth})",
+            )
+        )
+
+    leg1 = ax.legend(
+        handles=ethnicity_handles,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        title="Ethnicity",
+        framealpha=0.95,
+    )
+    ax.add_artist(leg1)
+    ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender", framealpha=0.95)
 
     fig.tight_layout()
     png_path = out_dir / f"{stem}.png"
@@ -455,7 +480,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-batch-size", type=int, default=32)
     parser.add_argument("--text-batch-size", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--sample-ratio", type=float, default=0.4)
+    parser.add_argument("--sample-ratio", type=float, default=1.0)
     parser.add_argument("--fuse-alpha", type=float, default=0.5)
     parser.add_argument("--n-clusters", type=int, default=12)
     parser.add_argument("--max-labels", type=int, default=8)
