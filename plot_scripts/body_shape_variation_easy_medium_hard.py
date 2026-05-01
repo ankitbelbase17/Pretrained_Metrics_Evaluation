@@ -158,22 +158,24 @@ def plot_body_shape_variation(
     ax_bar.tick_params(axis="x", bottom=False)
     ax_bar.grid(True, axis="y", linestyle="--", alpha=0.25, linewidth=0.5)
 
-    # PDF/CDF for overall standardized betas
+    # Empirical distribution for overall standardized betas (no Gaussian/KDE smoothing).
     z = _standardize(betas_all).reshape(-1)
     z = z[np.isfinite(z)]
     if z.size >= 5:
-        try:
-            import seaborn as sns
-
-            sns.kdeplot(z, ax=ax_pdf, color="#4C78A8", linewidth=1.8, label="Overall")
-        except Exception:
-            hist, edges = np.histogram(z, bins=60, density=True)
-            centers = 0.5 * (edges[:-1] + edges[1:])
-            ax_pdf.plot(centers, hist, color="#4C78A8", linewidth=1.6, label="Overall")
+        hist, edges = np.histogram(z, bins=80, density=True)
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        ax_pdf.plot(
+            centers,
+            hist,
+            color="#4C78A8",
+            linewidth=1.7,
+            label="Overall empirical density",
+        )
+        ax_pdf.fill_between(centers, hist, 0.0, color="#4C78A8", alpha=0.15)
 
         zs = np.sort(z)
         ys = np.linspace(0.0, 1.0, zs.size)
-        ax_cdf.plot(zs, ys, color="#72B7B2", linewidth=1.6, label="Overall")
+        ax_cdf.plot(zs, ys, color="#72B7B2", linewidth=1.7, label="Overall ECDF")
 
     for ax in (ax_pdf, ax_cdf):
         ax.set_xlabel("")
