@@ -148,6 +148,12 @@ def parse_args() -> argparse.Namespace:
         default=Path("./eda_cache/curvton"),
         help="Default cache directory to resolve easy/medium/hard NPZs.",
     )
+    parser.add_argument(
+        "--occ-maps-dir",
+        type=Path,
+        default=None,
+        help="Optional directory containing occ_maps-only caches (curvton_<split>_<pct>pct_occ_maps.npz).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/occlusion_easy_medium_hard"))
     parser.add_argument("--stem", type=str, default="occlusion_heatmap_easy_medium_hard")
@@ -184,12 +190,17 @@ def main() -> int:
     auto_defaults = False
     if args.easy is None and args.medium is None and args.hard is None:
         pct = int(round(forced_ratio * 100))
-        args.easy = args.cache_dir / f"curvton_easy_{pct}pct.npz"
-        args.medium = args.cache_dir / f"curvton_medium_{pct}pct.npz"
-        args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
+        if args.occ_maps_dir is not None:
+            args.easy = args.occ_maps_dir / f"curvton_easy_{pct}pct_occ_maps.npz"
+            args.medium = args.occ_maps_dir / f"curvton_medium_{pct}pct_occ_maps.npz"
+            args.hard = args.occ_maps_dir / f"curvton_hard_{pct}pct_occ_maps.npz"
+        else:
+            args.easy = args.cache_dir / f"curvton_easy_{pct}pct.npz"
+            args.medium = args.cache_dir / f"curvton_medium_{pct}pct.npz"
+            args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
         auto_defaults = True
 
-    if auto_defaults:
+    if auto_defaults and args.occ_maps_dir is None:
         missing_diffs = caches_requiring_generation(
             cache_dir=args.cache_dir,
             sample_ratio=forced_ratio,

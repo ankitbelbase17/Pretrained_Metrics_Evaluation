@@ -11,6 +11,7 @@ if str(_ROOT) not in sys.path:
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import AutoMinorLocator, MaxNLocator
 from matplotlib.lines import Line2D
 import seaborn as sns
 
@@ -330,6 +331,10 @@ def plot_entropy_object_kde_concat(
     ax2.set_ylabel("Density")
 
     for ax in (ax1, ax2):
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.tick_params(axis="x", which="major", labelsize=8)
+        ax.tick_params(axis="x", which="minor", length=2)
         ax.grid(True, linestyle="--", alpha=0.25, linewidth=0.4)
 
     if show_legend and legend_handles:

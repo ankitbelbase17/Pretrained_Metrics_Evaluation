@@ -51,6 +51,77 @@ ALL_FEATURE_KEYS = {
 }
 
 
+def _m2_occ_ratio_and_map(
+    seg_masks: Dict[str, torch.Tensor],
+    idx: int,
+) -> Tuple[float, np.ndarray]:
+    """Match m2_occlusion person-centric logic for one sample."""
+    G = seg_masks["garment"].float()
+    body = seg_masks.get("body_parts", seg_masks.get("arms", torch.zeros_like(G))).float()
+    carried = seg_masks.get("carried_obj", torch.zeros_like(G)).float()
+    accessory = seg_masks.get("accessories", torch.zeros_like(G)).float()
+    env = seg_masks.get("environment", torch.zeros_like(G)).float()
+    people = seg_masks.get("other_people", torch.zeros_like(G)).float()
+    other = seg_masks.get("other", torch.zeros_like(G)).float()
+
+    if body.sum() == 0 and "arms" in seg_masks:
+        arms = seg_masks["arms"].float()
+        hair = seg_masks.get("hair", torch.zeros_like(G)).float()
+        body = ((arms + hair) > 0).float()
+
+    H, W = G.shape[-2], G.shape[-1]
+    person_core = ((G[idx] + body[idx]) > 0)
+    if person_core.sum() < 10:
+        return 0.0, np.zeros(MASK_DS, dtype=np.float32)
+
+    rows = person_core.any(dim=1).nonzero(as_tuple=True)[0]
+    cols = person_core.any(dim=0).nonzero(as_tuple=True)[0]
+    r0, r1 = rows[0].item(), rows[-1].item()
+    c0, c1 = cols[0].item(), cols[-1].item()
+
+    pr = max(1, int((r1 - r0) * 0.10))
+    pc = max(1, int((c1 - c0) * 0.10))
+    r0 = max(0, r0 - pr)
+    r1 = min(H - 1, r1 + pr)
+    c0 = max(0, c0 - pc)
+    c1 = min(W - 1, c1 + pc)
+
+    g_in = G[idx][r0 : r1 + 1, c0 : c1 + 1].sum().item()
+    b_in = body[idx][r0 : r1 + 1, c0 : c1 + 1].sum().item()
+    ca_in = carried[idx][r0 : r1 + 1, c0 : c1 + 1].sum().item()
+    ac_in = accessory[idx][r0 : r1 + 1, c0 : c1 + 1].sum().item()
+    en_in = env[idx][r0 : r1 + 1, c0 : c1 + 1].sum().item()
+    pe_in = people[idx][r0 : r1 + 1, c0 : c1 + 1].sum().item()
+    ot_in = other[idx][r0 : r1 + 1, c0 : c1 + 1].sum().item()
+
+    person_px = g_in + b_in
+    occluder_px = ca_in + ac_in + en_in + pe_in + ot_in
+    base_area = float(person_px + occluder_px)
+    if base_area < 1.0:
+        base_area = 1.0
+    occ_ratio = float(occluder_px / base_area)
+
+    # Spatial map: category-aware non-person occluders constrained to person bbox.
+    occ_map_full = torch.zeros_like(G[idx], dtype=torch.float32)
+    occ_map_bbox = (
+        carried[idx][r0 : r1 + 1, c0 : c1 + 1]
+        + accessory[idx][r0 : r1 + 1, c0 : c1 + 1]
+        + env[idx][r0 : r1 + 1, c0 : c1 + 1]
+        + people[idx][r0 : r1 + 1, c0 : c1 + 1]
+        + other[idx][r0 : r1 + 1, c0 : c1 + 1]
+    )
+    occ_map_bbox = (occ_map_bbox > 0).float()
+    occ_map_full[r0 : r1 + 1, c0 : c1 + 1] = occ_map_bbox
+
+    ds_map = F.interpolate(
+        occ_map_full.unsqueeze(0).unsqueeze(0),
+        size=MASK_DS,
+        mode="bilinear",
+        align_corners=False,
+    )
+    return occ_ratio, ds_map.squeeze().cpu().numpy().astype(np.float32)
+
+
 def _free_gpu() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -254,20 +325,10 @@ def _extract_features(
         if seg_backend is not None:
             # M2: Occlusion
             seg_masks = seg_backend.segment(person)
-            garment_mask = seg_masks["garment"].float()
-            occluder = (
-                seg_masks["arms"].float() + seg_masks["hair"].float() + seg_masks["other"].float()
-            )
-            occluder = (occluder > 0).float()
-            overlap = garment_mask * occluder
             for i in range(person.shape[0]):
-                g_area = garment_mask[i].sum().item()
-                ratio = overlap[i].sum().item() / max(g_area, 1.0)
-                occ_ratios.append(float(min(ratio, 1.0)))
-
-                full_map = overlap[i].unsqueeze(0).unsqueeze(0)
-                ds_map = F.interpolate(full_map, size=MASK_DS, mode="bilinear", align_corners=False)
-                occ_maps.append(ds_map.squeeze().cpu().numpy().astype(np.float32))
+                ratio, ds_map = _m2_occ_ratio_and_map(seg_masks, i)
+                occ_ratios.append(ratio)
+                occ_maps.append(ds_map)
 
         if person_seg is not None and obj_det is not None:
             # M3: Background
@@ -361,12 +422,33 @@ def _save_cache(cache_path: Path, data: Dict[str, np.ndarray], force: bool) -> N
     print(f"[save] {cache_path}")
 
 
+def _save_occ_maps_only(
+    occ_maps_path: Path,
+    data: Dict[str, np.ndarray],
+    force: bool,
+) -> None:
+    if "occ_maps" not in data:
+        return
+    if occ_maps_path.exists() and not force:
+        print(f"[skip] Occ maps cache exists: {occ_maps_path}")
+        return
+    occ_maps_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(occ_maps_path, occ_maps=data["occ_maps"])
+    print(f"[save] {occ_maps_path}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate CurvTON feature caches for plot_scripts (easy/medium/hard/all)."
     )
     parser.add_argument("--base-path", type=str, required=True)
     parser.add_argument("--cache-dir", type=Path, default=Path("./eda_cache/curvton"))
+    parser.add_argument(
+        "--occ-maps-dir",
+        type=Path,
+        default=None,
+        help="Optional separate directory to save occ_maps-only NPZ per difficulty.",
+    )
     parser.add_argument("--sample-ratio", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -408,6 +490,7 @@ def generate_curvton_caches(
     *,
     base_path: str,
     cache_dir: Path,
+    occ_maps_dir: Path | None,
     sample_ratio: float,
     difficulties: List[str],
     seed: int,
@@ -450,6 +533,9 @@ def generate_curvton_caches(
             required_keys=required_keys,
         )
         _save_cache(cache_path, data, force=force)
+        if occ_maps_dir is not None and "occ_maps" in data:
+            occ_maps_path = occ_maps_dir / f"curvton_{diff}_{pct}pct_occ_maps.npz"
+            _save_occ_maps_only(occ_maps_path, data, force=force)
 
 
 def main() -> int:
@@ -458,6 +544,7 @@ def main() -> int:
     generate_curvton_caches(
         base_path=args.base_path,
         cache_dir=args.cache_dir,
+        occ_maps_dir=args.occ_maps_dir,
         sample_ratio=args.sample_ratio,
         difficulties=list(args.difficulties),
         seed=args.seed,
