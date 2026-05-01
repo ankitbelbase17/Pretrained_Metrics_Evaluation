@@ -148,12 +148,6 @@ def parse_args() -> argparse.Namespace:
         default=Path("./eda_cache/curvton"),
         help="Default cache directory to resolve easy/medium/hard NPZs.",
     )
-    parser.add_argument(
-        "--occ-maps-dir",
-        type=Path,
-        default=None,
-        help="Directory containing occ_maps-only caches (curvton_<split>_<pct>pct_occ_maps.npz).",
-    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/occlusion_easy_medium_hard"))
     parser.add_argument("--stem", type=str, default="occlusion_heatmap_easy_medium_hard")
