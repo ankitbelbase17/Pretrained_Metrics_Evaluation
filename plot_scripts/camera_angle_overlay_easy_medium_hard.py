@@ -128,7 +128,7 @@ def plot_camera_overlay(
     _apply_eccv_style()
     colors = _difficulty_colors()
 
-    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=150)
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=150, constrained_layout=True)
 
     for label in ["Easy", "Medium", "Hard"]:
         if label not in datasets:
@@ -173,7 +173,6 @@ def plot_camera_overlay(
     ax.legend(handles=legend_handles, loc="upper right", framealpha=0.9, fontsize=8)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
     fig.savefig(out_dir / f"{stem}.png", dpi=450, bbox_inches="tight")
     fig.savefig(out_dir / f"{stem}.pdf", bbox_inches="tight")
     plt.close(fig)
