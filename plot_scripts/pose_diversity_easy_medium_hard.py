@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 import sys
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -96,11 +96,7 @@ def _pose_diversity_score(pose_vecs: np.ndarray) -> float:
         raise ValueError(f"pose_vecs expected shape (N, D), got {pose_vecs.shape}")
     if pose_vecs.shape[0] < 2:
         return 0.0
-    # Normalize per-dimension to focus on diversity, not scale.
-    mu = pose_vecs.mean(axis=0, keepdims=True)
-    sig = pose_vecs.std(axis=0, keepdims=True) + 1e-8
-    normed = (pose_vecs - mu) / sig
-    return float(np.mean(np.var(normed, axis=0)))
+    return float(np.mean(np.var(pose_vecs, axis=0)))
 
 
 def _angle_diversity_score(angles: np.ndarray) -> float:
@@ -123,11 +119,23 @@ def _save_fig(fig, out_dir: Path, stem: str) -> None:
         fig.savefig(out_dir / f"{stem}.pdf", bbox_inches="tight")
 
 
+def _select_pose_feature_indices(
+    pose_by_split: Dict[str, np.ndarray],
+    n_features: int,
+) -> np.ndarray:
+    all_pose = np.concatenate([pose_by_split[k] for k in ["Easy", "Medium", "Hard"]], axis=0)
+    global_var = np.var(all_pose, axis=0)
+    n = min(n_features, global_var.shape[0])
+    idx = np.argsort(-global_var)[:n]
+    return np.sort(idx)
+
+
 def plot_pose_diversity(
-    metrics: Dict[str, Tuple[float, float]],
+    pose_by_split: Dict[str, np.ndarray],
     out_dir: Path,
     stem: str,
     show_legend: bool,
+    n_features: int,
 ) -> None:
     _apply_eccv_style()
     base_colors = _difficulty_colors()
@@ -138,23 +146,25 @@ def plot_pose_diversity(
     }
 
     difficulties = ["Easy", "Medium", "Hard"]
-    metric_labels = ["Pose Variance", "Angle Variance"]
+    feat_idx = _select_pose_feature_indices(pose_by_split, n_features=n_features)
+    metric_labels: List[str] = [f"f{int(i)}" for i in feat_idx]
 
-    # Normalize each metric across splits so both dimensions are visually comparable on radar.
-    pose_vals = np.array([metrics[d][0] for d in difficulties], dtype=np.float32)
-    angle_vals = np.array([metrics[d][1] for d in difficulties], dtype=np.float32)
+    per_split_feature_var: Dict[str, np.ndarray] = {}
+    for d in difficulties:
+        per_split_feature_var[d] = np.var(pose_by_split[d][:, feat_idx], axis=0)
 
-    def _normalize(vals: np.ndarray) -> np.ndarray:
-        vmin = float(np.min(vals))
-        vmax = float(np.max(vals))
-        if vmax - vmin < 1e-8:
-            return np.full_like(vals, 0.5, dtype=np.float32)
-        return (vals - vmin) / (vmax - vmin)
-
-    pose_norm = _normalize(pose_vals)
-    angle_norm = _normalize(angle_vals)
+    all_vals = np.concatenate([per_split_feature_var[d] for d in difficulties], axis=0)
+    radial_max = float(np.max(all_vals)) if all_vals.size else 1.0
+    if radial_max <= 0.0:
+        radial_max = 1.0
 
     n_axes = len(metric_labels)
+    if n_axes < 3:
+        raise ValueError(
+            f"Need at least 3 pose features for a spider plot, got {n_axes}. "
+            "Increase --num-pose-features or check pose_vec dimensionality."
+        )
+
     angles = np.linspace(0, 2 * np.pi, n_axes, endpoint=False)
     angles_closed = np.concatenate([angles, [angles[0]]])
 
@@ -163,23 +173,23 @@ def plot_pose_diversity(
 
     ax.set_theta_offset(np.pi / 2)
     ax.set_theta_direction(-1)
-    ax.set_ylim(0.0, 1.0)
+    ax.set_ylim(0.0, radial_max * 1.05)
     ax.set_xticks(angles)
     ax.set_xticklabels(metric_labels, fontsize=8)
-    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
-    ax.set_yticklabels([])
+    y_ticks = np.linspace(0.2 * radial_max, radial_max, num=5)
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels([f"{v:.2f}" for v in y_ticks], fontsize=7, color="#6B7280")
     ax.grid(color="#D9DEE7", linewidth=0.8, alpha=0.9)
     ax.spines["polar"].set_color("#C5CCD8")
     ax.spines["polar"].set_linewidth(0.8)
 
-    for i, d in enumerate(difficulties):
-        vals = np.array([pose_norm[i], angle_norm[i]], dtype=np.float32)
+    for d in difficulties:
+        vals = per_split_feature_var[d].astype(np.float32)
         vals_closed = np.concatenate([vals, [vals[0]]])
         ax.plot(angles_closed, vals_closed, color=colors[d], linewidth=1.8, label=d)
         ax.fill(angles_closed, vals_closed, color=colors[d], alpha=0.20)
 
-    # Minimal center annotation for readability in publication context.
-    ax.text(0.0, 0.0, "Normalized\n0-1", ha="center", va="center", fontsize=7, color="#5A6372")
+    ax.set_title("Pose Feature Variance (True Statistics)", fontsize=9, pad=14)
 
     if show_legend:
         ax.legend(loc="upper right", bbox_to_anchor=(1.22, 1.12), framealpha=0.95, fontsize=8)
@@ -206,6 +216,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/pose_diversity"))
     parser.add_argument("--stem", type=str, default="pose_diversity_easy_medium_hard")
     parser.add_argument("--no-legend", action="store_true", help="Disable legend for minimal text.")
+    parser.add_argument(
+        "--num-pose-features",
+        type=int,
+        default=12,
+        help="Number of highest-variance pose features to display in spider plot.",
+    )
     add_autogen_args(parser)
     return parser.parse_args()
 
@@ -251,6 +267,7 @@ def main() -> int:
     _require_cache_files((args.easy, args.medium, args.hard))
 
     metrics: Dict[str, Tuple[float, float]] = {}
+    pose_by_split: Dict[str, np.ndarray] = {}
     for label, path in [
         ("Easy", args.easy),
         ("Medium", args.medium),
@@ -259,15 +276,17 @@ def main() -> int:
         pose_vecs, angles = _load_pose_arrays(path)
         if not auto_defaults:
             pose_vecs, angles = _subsample_pair(pose_vecs, angles, forced_ratio, args.seed)
+        pose_by_split[label] = pose_vecs
         pose_score = _pose_diversity_score(pose_vecs)
         angle_score = _angle_diversity_score(angles)
         metrics[label] = (pose_score, angle_score)
 
     plot_pose_diversity(
-        metrics=metrics,
+        pose_by_split=pose_by_split,
         out_dir=args.out_dir,
         stem=args.stem,
         show_legend=not args.no_legend,
+        n_features=args.num_pose_features,
     )
 
     print("Pose diversity scores:")
