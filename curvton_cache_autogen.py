@@ -45,6 +45,12 @@ def add_autogen_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Overwrite existing cache files during auto-generation.",
     )
+    parser.add_argument(
+        "--occ-maps-dir",
+        type=Path,
+        default=None,
+        help="Directory for separate occ_maps-only caches (required for occlusion map workflows).",
+    )
 
 
 def default_cache_paths(cache_dir: Path, sample_ratio: float) -> Dict[str, Path]:
@@ -123,6 +129,7 @@ def ensure_curvton_caches(
     generate_curvton_caches(
         base_path=str(base_path),
         cache_dir=args.cache_dir,
+        occ_maps_dir=getattr(args, "occ_maps_dir", None),
         sample_ratio=sample_ratio,
         difficulties=list(diffs),
         seed=args.seed,

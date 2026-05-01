@@ -152,7 +152,7 @@ def parse_args() -> argparse.Namespace:
         "--occ-maps-dir",
         type=Path,
         default=None,
-        help="Optional directory containing occ_maps-only caches (curvton_<split>_<pct>pct_occ_maps.npz).",
+        help="Directory containing occ_maps-only caches (curvton_<split>_<pct>pct_occ_maps.npz).",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/occlusion_easy_medium_hard"))
@@ -186,29 +186,31 @@ def _require_cache_files(paths: Tuple[Path, ...]) -> None:
 def main() -> int:
     args = parse_args()
     forced_ratio = REQUIRED_SAMPLE_RATIO
+    if args.occ_maps_dir is None:
+        raise ValueError(
+            "--occ-maps-dir is mandatory. Previous mixed caches are disallowed for occlusion heatmaps."
+        )
 
     auto_defaults = False
     if args.easy is None and args.medium is None and args.hard is None:
         pct = int(round(forced_ratio * 100))
-        if args.occ_maps_dir is not None:
-            args.easy = args.occ_maps_dir / f"curvton_easy_{pct}pct_occ_maps.npz"
-            args.medium = args.occ_maps_dir / f"curvton_medium_{pct}pct_occ_maps.npz"
-            args.hard = args.occ_maps_dir / f"curvton_hard_{pct}pct_occ_maps.npz"
-        else:
-            args.easy = args.cache_dir / f"curvton_easy_{pct}pct.npz"
-            args.medium = args.cache_dir / f"curvton_medium_{pct}pct.npz"
-            args.hard = args.cache_dir / f"curvton_hard_{pct}pct.npz"
+        args.easy = args.occ_maps_dir / f"curvton_easy_{pct}pct_occ_maps.npz"
+        args.medium = args.occ_maps_dir / f"curvton_medium_{pct}pct_occ_maps.npz"
+        args.hard = args.occ_maps_dir / f"curvton_hard_{pct}pct_occ_maps.npz"
         auto_defaults = True
 
-    if auto_defaults and args.occ_maps_dir is None:
-        missing_diffs = caches_requiring_generation(
-            cache_dir=args.cache_dir,
-            sample_ratio=forced_ratio,
-            difficulties=["easy", "medium", "hard"],
-            required_keys=["occ_maps"],
-        )
-    else:
-        missing_diffs = []
+    missing_diffs = []
+    if auto_defaults:
+        # Check missing splits using separate occ_maps cache directory.
+        pct = int(round(forced_ratio * 100))
+        expected = {
+            "easy": args.occ_maps_dir / f"curvton_easy_{pct}pct_occ_maps.npz",
+            "medium": args.occ_maps_dir / f"curvton_medium_{pct}pct_occ_maps.npz",
+            "hard": args.occ_maps_dir / f"curvton_hard_{pct}pct_occ_maps.npz",
+        }
+        for diff, p in expected.items():
+            if not p.exists():
+                missing_diffs.append(diff)
     if missing_diffs:
         ensure_curvton_caches(
             missing_diffs,

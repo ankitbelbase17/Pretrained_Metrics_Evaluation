@@ -490,7 +490,7 @@ def generate_curvton_caches(
     *,
     base_path: str,
     cache_dir: Path,
-    occ_maps_dir: Path | None,
+    occ_maps_dir: Path | None = None,
     sample_ratio: float,
     difficulties: List[str],
     seed: int,
@@ -507,6 +507,12 @@ def generate_curvton_caches(
 ) -> None:
     if not (0.0 < sample_ratio <= 1.0):
         raise ValueError("sample_ratio must be in (0, 1]")
+    required = set(required_keys) if required_keys else set(ALL_FEATURE_KEYS)
+    if "occ_maps" in required and occ_maps_dir is None:
+        raise ValueError(
+            "occ_maps_dir is mandatory when generating occ_maps. "
+            "Provide --occ-maps-dir to avoid using legacy mixed caches."
+        )
 
     _verify_models(device, garment_backend, sd_clip_model_id, required_keys)
 
@@ -533,7 +539,7 @@ def generate_curvton_caches(
             required_keys=required_keys,
         )
         _save_cache(cache_path, data, force=force)
-        if occ_maps_dir is not None and "occ_maps" in data:
+        if "occ_maps" in data:
             occ_maps_path = occ_maps_dir / f"curvton_{diff}_{pct}pct_occ_maps.npz"
             _save_occ_maps_only(occ_maps_path, data, force=force)
 

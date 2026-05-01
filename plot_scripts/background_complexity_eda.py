@@ -329,8 +329,6 @@ def plot_entropy_object_kde_concat(
     ax1.set_ylabel("Density")
     ax2.set_xlabel("Object Count")
     ax2.set_ylabel("Density")
-    ax2.set_xlim(left=0.0)
-    ax2.xaxis.set_major_locator(plt.MultipleLocator(2.0))
 
     for ax in (ax1, ax2):
         ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
@@ -338,6 +336,16 @@ def plot_entropy_object_kde_concat(
         ax.tick_params(axis="x", which="major", labelsize=8)
         ax.tick_params(axis="x", which="minor", length=2)
         ax.grid(True, linestyle="--", alpha=0.25, linewidth=0.4)
+
+    # Detailed zoom for object count: focus on bulk distribution while avoiding negative axis.
+    obj_all = np.concatenate([datasets_obj[k] for k in datasets_obj]) if datasets_obj else np.array([])
+    obj_all = obj_all[np.isfinite(obj_all)]
+    if obj_all.size > 0:
+        x_hi = float(np.percentile(obj_all, 99.0))
+        x_hi = max(4.0, np.ceil(x_hi))
+        ax2.set_xlim(0.0, x_hi)
+        ax2.xaxis.set_major_locator(plt.MultipleLocator(1.0))
+        ax2.xaxis.set_minor_locator(AutoMinorLocator(2))
 
     if show_legend and legend_handles:
         fig.legend(handles=legend_handles, loc="upper center", ncol=min(4, len(legend_handles)))
