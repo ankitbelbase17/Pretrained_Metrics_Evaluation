@@ -324,13 +324,12 @@ def plot_entropy_object_kde_concat(
 
     ax1.set_title("Background Entropy")
     ax2.set_title("Object Density")
+    ax1.set_xlabel("Entropy")
+    ax1.set_ylabel("Density")
+    ax2.set_xlabel("Object Count")
+    ax2.set_ylabel("Density")
 
     for ax in (ax1, ax2):
-        ax.set_xlabel("")
-        ax.set_ylabel("")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
         ax.grid(True, linestyle="--", alpha=0.25, linewidth=0.4)
 
     if show_legend and legend_handles:
