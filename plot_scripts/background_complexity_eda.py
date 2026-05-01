@@ -293,6 +293,54 @@ def plot_entropy_object_bars_concat(
     plt.close(fig)
 
 
+def plot_entropy_object_kde_concat(
+    datasets_ent: Dict[str, np.ndarray],
+    datasets_obj: Dict[str, np.ndarray],
+    out_dir: Path,
+    show_legend: bool,
+) -> None:
+    _apply_eccv_style()
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.875, 2.6))
+    legend_handles: List[Line2D] = []
+
+    for i, label in enumerate(datasets_ent.keys()):
+        ent = datasets_ent.get(label, np.array([], dtype=np.float32))
+        obj = datasets_obj.get(label, np.array([], dtype=np.float32))
+        ent = ent[np.isfinite(ent)]
+        obj = obj[np.isfinite(obj)]
+        if len(ent) == 0 and len(obj) == 0:
+            continue
+
+        color = _get_palette(label, i)
+        if len(ent) > 0:
+            sns.kdeplot(ent, ax=ax1, fill=True, alpha=0.20, color=color, linewidth=1.6)
+            ax1.axvline(ent.mean(), color=color, linestyle="--", linewidth=1.1, alpha=0.9)
+        if len(obj) > 0:
+            sns.kdeplot(obj, ax=ax2, fill=True, alpha=0.20, color=color, linewidth=1.6)
+            ax2.axvline(obj.mean(), color=color, linestyle="--", linewidth=1.1, alpha=0.9)
+
+        legend_handles.append(Line2D([0], [0], color=color, linewidth=1.6, label=label))
+
+    ax1.set_title("Background Entropy")
+    ax2.set_title("Object Density")
+
+    for ax in (ax1, ax2):
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+        ax.grid(True, linestyle="--", alpha=0.25, linewidth=0.4)
+
+    if show_legend and legend_handles:
+        fig.legend(handles=legend_handles, loc="upper center", ncol=min(4, len(legend_handles)))
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "bg_entropy_object_density_kde_concat")
+    plt.close(fig)
+
+
 def plot_entropy_vs_objects(
     datasets_ent: Dict[str, np.ndarray],
     datasets_obj: Dict[str, np.ndarray],
@@ -464,7 +512,7 @@ def main() -> int:
 
     show_legend = not args.no_legend
 
-    plot_entropy_object_bars_concat(ent_data, obj_data, args.out_dir, show_legend=show_legend)
+    plot_entropy_object_kde_concat(ent_data, obj_data, args.out_dir, show_legend=show_legend)
 
     return 0
 
