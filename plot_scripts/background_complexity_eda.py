@@ -329,6 +329,8 @@ def plot_entropy_object_kde_concat(
     ax1.set_ylabel("Density")
     ax2.set_xlabel("Object Count")
     ax2.set_ylabel("Density")
+    ax2.set_xlim(left=0.0)
+    ax2.xaxis.set_major_locator(plt.MultipleLocator(2.0))
 
     for ax in (ax1, ax2):
         ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
