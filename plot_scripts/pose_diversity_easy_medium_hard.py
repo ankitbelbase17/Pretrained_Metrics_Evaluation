@@ -19,7 +19,7 @@ from curvton_cache_autogen import (
 )
 
 
-REQUIRED_SAMPLE_RATIO = 0.05
+REQUIRED_SAMPLE_RATIO = 0.25
 
 
 def _apply_eccv_style() -> None:
@@ -153,10 +153,14 @@ def plot_pose_diversity(
     for d in difficulties:
         per_split_feature_var[d] = np.var(pose_by_split[d][:, feat_idx], axis=0)
 
-    all_vals = np.concatenate([per_split_feature_var[d] for d in difficulties], axis=0)
-    radial_max = float(np.max(all_vals)) if all_vals.size else 1.0
-    if radial_max <= 0.0:
-        radial_max = 1.0
+    # Normalize each feature axis across splits (Easy/Medium/Hard) for balanced visual comparison.
+    var_matrix = np.stack([per_split_feature_var[d] for d in difficulties], axis=0)  # (3, F)
+    feat_min = np.min(var_matrix, axis=0, keepdims=True)
+    feat_max = np.max(var_matrix, axis=0, keepdims=True)
+    denom = np.where((feat_max - feat_min) < 1e-12, 1.0, feat_max - feat_min)
+    var_matrix_norm = (var_matrix - feat_min) / denom
+    per_split_feature_var = {d: var_matrix_norm[i] for i, d in enumerate(difficulties)}
+    radial_max = 1.0
 
     n_axes = len(metric_labels)
     if n_axes < 3:
@@ -189,7 +193,7 @@ def plot_pose_diversity(
         ax.plot(angles_closed, vals_closed, color=colors[d], linewidth=1.8, label=d)
         ax.fill(angles_closed, vals_closed, color=colors[d], alpha=0.20)
 
-    ax.set_title("Pose Feature Variance (True Statistics)", fontsize=9, pad=14)
+    ax.set_title("Pose Feature Variance (Normalized)", fontsize=9, pad=14)
 
     if show_legend:
         ax.legend(loc="upper right", bbox_to_anchor=(1.22, 1.12), framealpha=0.95, fontsize=8)
