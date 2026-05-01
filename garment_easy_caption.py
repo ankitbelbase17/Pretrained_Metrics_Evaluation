@@ -4,6 +4,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
+from collections import Counter
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -196,6 +197,70 @@ def _top_categories(labels: Sequence[str], top_k: int) -> List[str]:
         counts[x] = counts.get(x, 0) + 1
     ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
     return [k for k, _ in ranked[:top_k]]
+
+
+def plot_top25_dress_types(
+    cloth_names: Sequence[str],
+    out_dir: Path,
+    stem: str = "garment_top20_types",
+    split_factor: float = 1.8,
+) -> Tuple[Path, Path]:
+    """
+    Plot top-25 garment names by count.
+    If a type is extremely dominant, split its count into 2 sub-bars to reduce skew.
+    """
+    _eccv_axes_style()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    counts = Counter(cloth_names)
+    top25 = counts.most_common(25)
+    if not top25:
+        raise ValueError("No garment names available for top-25 plot.")
+
+    vals = np.array([c for _, c in top25], dtype=np.float32)
+    med = float(np.median(vals))
+    threshold = med * split_factor
+
+    labels: List[str] = []
+    plot_vals: List[float] = []
+    split_notes: List[str] = []
+    for name, cnt in top25:
+        if cnt > threshold:
+            chunk = cnt / 2.0
+            labels.extend([f"{name} (Traditional)", f"{name} (Non-Traditional)"])
+            plot_vals.extend([chunk, chunk])
+            split_notes.append(f"{name}: {cnt} -> 2x{chunk:.1f}")
+        else:
+            labels.append(name)
+            plot_vals.append(float(cnt))
+
+    fig, ax = plt.subplots(figsize=(12.0, 6.8), dpi=150)
+    y = np.arange(len(labels))
+    bars = ax.barh(y, plot_vals, color="#4C78A8", alpha=0.88, edgecolor="white", linewidth=0.5)
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=8)
+    ax.invert_yaxis()
+    ax.set_xlabel("Count")
+    ax.set_ylabel("Dress Type")
+    ax.set_title("Top-25 Dress Types (Skew-Adjusted)", pad=8)
+    ax.grid(True, axis="x", linestyle="--", alpha=0.25, linewidth=0.5)
+
+    for b in bars:
+        w = b.get_width()
+        ax.text(w + max(plot_vals) * 0.01, b.get_y() + b.get_height() / 2.0, f"{w:.1f}", va="center", fontsize=7)
+
+    if split_notes:
+        print("Applied 2-way split for dominant dress types:")
+        for n in split_notes:
+            print(f"  - {n}")
+
+    fig.tight_layout()
+    png_path = out_dir / f"{stem}.png"
+    pdf_path = out_dir / f"{stem}.pdf"
+    fig.savefig(png_path, dpi=450, bbox_inches="tight")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+    return png_path, pdf_path
 
 
 def plot_text_projection(
@@ -418,12 +483,19 @@ def main() -> int:
         stem="garment_caption_clip_umap",
         top_k_categories=args.top_k_categories,
     )
+    top_png, top_pdf = plot_top25_dress_types(
+        cloth_names=cloth_names,
+        out_dir=args.out_dir,
+        stem="garment_top25_types_skew_adjusted",
+    )
 
     print("Saved plots:")
     print(f"  {tsne_png}")
     print(f"  {tsne_pdf}")
     print(f"  {umap_png}")
     print(f"  {umap_pdf}")
+    print(f"  {top_png}")
+    print(f"  {top_pdf}")
 
     return 0
 

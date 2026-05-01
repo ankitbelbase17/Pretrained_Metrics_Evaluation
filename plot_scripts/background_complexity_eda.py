@@ -337,10 +337,10 @@ def plot_entropy_object_kde_concat(
         ax.tick_params(axis="x", which="minor", length=2)
         ax.grid(True, linestyle="--", alpha=0.25, linewidth=0.4)
 
-    # Fixed detailed scale requested for object density.
-    ax2.set_xlim(2.0, 16.0)
-    ax2.set_xticks(np.arange(2.0, 18.0, 2.0))
-    ax2.xaxis.set_minor_locator(AutoMinorLocator(2))
+    # Fixed readable scale requested for object density.
+    ax2.set_xlim(2.0, 24.0)
+    ax2.set_xticks(np.arange(2.0, 26.0, 2.0))
+    ax2.xaxis.set_minor_locator(AutoMinorLocator(1))
 
     if show_legend and legend_handles:
         fig.legend(handles=legend_handles, loc="upper center", ncol=min(4, len(legend_handles)))
