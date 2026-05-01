@@ -149,16 +149,23 @@ def plot_pose_diversity(
     feat_idx = _select_pose_feature_indices(pose_by_split, n_features=n_features)
     metric_labels: List[str] = [f"f{int(i)}" for i in feat_idx]
 
+    # Use global z-scored pose features first, then compute per-split variance.
+    # This avoids per-split min-max artifacts that force one split to 0 and another to 1.
+    all_pose = np.concatenate([pose_by_split[k] for k in difficulties], axis=0)
+    g_mu = all_pose.mean(axis=0, keepdims=True)
+    g_sig = all_pose.std(axis=0, keepdims=True) + 1e-8
+
     per_split_feature_var: Dict[str, np.ndarray] = {}
     for d in difficulties:
-        per_split_feature_var[d] = np.var(pose_by_split[d][:, feat_idx], axis=0)
+        pose_z = (pose_by_split[d] - g_mu) / g_sig
+        per_split_feature_var[d] = np.var(pose_z[:, feat_idx], axis=0)
 
-    # Normalize each feature axis across splits (Easy/Medium/Hard) for balanced visual comparison.
+    # Normalize for display across all plotted values (not per-feature across 3 splits).
     var_matrix = np.stack([per_split_feature_var[d] for d in difficulties], axis=0)  # (3, F)
-    feat_min = np.min(var_matrix, axis=0, keepdims=True)
-    feat_max = np.max(var_matrix, axis=0, keepdims=True)
-    denom = np.where((feat_max - feat_min) < 1e-12, 1.0, feat_max - feat_min)
-    var_matrix_norm = (var_matrix - feat_min) / denom
+    vmax = float(np.max(var_matrix))
+    if vmax < 1e-12:
+        vmax = 1.0
+    var_matrix_norm = var_matrix / vmax
     per_split_feature_var = {d: var_matrix_norm[i] for i, d in enumerate(difficulties)}
     radial_max = 1.0
 
@@ -187,11 +194,20 @@ def plot_pose_diversity(
     ax.spines["polar"].set_color("#C5CCD8")
     ax.spines["polar"].set_linewidth(0.8)
 
+    line_styles = {"Easy": "-", "Medium": "--", "Hard": "-."}
     for d in difficulties:
         vals = per_split_feature_var[d].astype(np.float32)
         vals_closed = np.concatenate([vals, [vals[0]]])
-        ax.plot(angles_closed, vals_closed, color=colors[d], linewidth=1.8, label=d)
-        ax.fill(angles_closed, vals_closed, color=colors[d], alpha=0.20)
+        ax.plot(
+            angles_closed,
+            vals_closed,
+            color=colors[d],
+            linewidth=2.0,
+            linestyle=line_styles[d],
+            label=d,
+            zorder=3,
+        )
+        ax.fill(angles_closed, vals_closed, color=colors[d], alpha=0.07, zorder=2)
 
     ax.set_title("Pose Feature Variance (Normalized)", fontsize=9, pad=14)
 
