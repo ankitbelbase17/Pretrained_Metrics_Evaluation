@@ -98,7 +98,7 @@ def plot_easy_medium_hard_heatmaps(
     if vmax <= vmin:
         raise ValueError("vmax must be greater than vmin")
 
-    fig, axes = plt.subplots(1, len(labels), figsize=(6.875, 2.5), dpi=150)
+    fig, axes = plt.subplots(1, len(labels), figsize=(6.875, 2.5), dpi=150, constrained_layout=True)
     if len(labels) == 1:
         axes = [axes]
 
@@ -128,7 +128,6 @@ def plot_easy_medium_hard_heatmaps(
     out_dir.mkdir(parents=True, exist_ok=True)
     out_png = out_dir / f"{stem}.png"
     out_pdf = out_dir / f"{stem}.pdf"
-    fig.tight_layout()
     fig.savefig(out_png, dpi=450, bbox_inches="tight")
     fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
