@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Tuple
 import sys
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -127,59 +127,53 @@ def _save_fig(fig, out_dir: Path, stem: str) -> None:
 
 
 def plot_body_shape_variation(
-    metrics: Dict[str, Tuple[float, float]],
-    betas_by_label: Dict[str, np.ndarray],
+    variance_score: float,
+    entropy_score: float,
+    betas_all: np.ndarray,
     out_dir: Path,
     stem: str,
     show_legend: bool,
 ) -> None:
     _apply_eccv_style()
-    colors = _difficulty_colors()
-
-    labels = ["Easy", "Medium", "Hard"]
-    x = np.arange(len(labels))
-    width = 0.34
-
-    var_vals = [metrics[lbl][0] for lbl in labels]
-    ent_vals = [metrics[lbl][1] for lbl in labels]
+    colors = {"Variance": "#4C78A8", "Entropy": "#72B7B2"}
 
     fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.9), dpi=150)
     ax_bar, ax_pdf, ax_cdf = axes
 
-    # Bar plot: variance + entropy summary
-    ax_bar.bar(x - width / 2, var_vals, width, color=[colors[l] for l in labels], alpha=0.85, label="Variance")
-    ax_bar.bar(x + width / 2, ent_vals, width, color=[colors[l] for l in labels], alpha=0.45, label="Entropy")
+    # Bar plot: overall variance + entropy summary
+    x = np.arange(2)
+    vals = [variance_score, entropy_score]
+    labels = ["Variance", "Entropy"]
+    ax_bar.bar(
+        x,
+        vals,
+        width=0.58,
+        color=[colors["Variance"], colors["Entropy"]],
+        alpha=0.9,
+    )
     ax_bar.set_xticks(x)
     ax_bar.set_xticklabels(labels, fontsize=9, fontweight="bold")
     ax_bar.set_xlabel("")
     ax_bar.set_ylabel("")
-    ax_bar.tick_params(axis="y", left=False, labelleft=False)
     ax_bar.tick_params(axis="x", bottom=False)
+    ax_bar.grid(True, axis="y", linestyle="--", alpha=0.25, linewidth=0.5)
 
-    # PDF/CDF overlays for standardized betas
-    for label in labels:
-        betas = betas_by_label.get(label)
-        if betas is None or betas.size == 0:
-            continue
-        z = _standardize(betas).reshape(-1)
-        z = z[np.isfinite(z)]
-        if z.size < 5:
-            continue
-        color = colors[label]
-        # PDF via KDE (seaborn available in repo stack)
+    # PDF/CDF for overall standardized betas
+    z = _standardize(betas_all).reshape(-1)
+    z = z[np.isfinite(z)]
+    if z.size >= 5:
         try:
             import seaborn as sns
 
-            sns.kdeplot(z, ax=ax_pdf, color=color, linewidth=1.6)
+            sns.kdeplot(z, ax=ax_pdf, color="#4C78A8", linewidth=1.8, label="Overall")
         except Exception:
             hist, edges = np.histogram(z, bins=60, density=True)
             centers = 0.5 * (edges[:-1] + edges[1:])
-            ax_pdf.plot(centers, hist, color=color, linewidth=1.4)
+            ax_pdf.plot(centers, hist, color="#4C78A8", linewidth=1.6, label="Overall")
 
-        # CDF via empirical distribution
         zs = np.sort(z)
         ys = np.linspace(0.0, 1.0, zs.size)
-        ax_cdf.plot(zs, ys, color=color, linewidth=1.5)
+        ax_cdf.plot(zs, ys, color="#72B7B2", linewidth=1.6, label="Overall")
 
     for ax in (ax_pdf, ax_cdf):
         ax.set_xlabel("")
@@ -195,7 +189,8 @@ def plot_body_shape_variation(
             spine.set_color("#cccccc")
 
     if show_legend:
-        ax_bar.legend(loc="upper right", framealpha=0.9, fontsize=8)
+        ax_pdf.legend(loc="upper right", framealpha=0.9, fontsize=8)
+        ax_cdf.legend(loc="lower right", framealpha=0.9, fontsize=8)
 
     fig.tight_layout()
     _save_fig(fig, out_dir, stem)
@@ -264,8 +259,7 @@ def main() -> int:
         )
     _require_cache_files((args.easy, args.medium, args.hard))
 
-    metrics: Dict[str, Tuple[float, float]] = {}
-    betas_by_label: Dict[str, np.ndarray] = {}
+    all_betas = []
     for label, path in [
         ("Easy", args.easy),
         ("Medium", args.medium),
@@ -274,22 +268,23 @@ def main() -> int:
         betas = _load_betas(path)
         if not auto_defaults:
             betas = _subsample(betas, forced_ratio, args.seed)
-        var_score = _variation_score(betas)
-        ent_score = _entropy_score(betas, bins=args.entropy_bins)
-        metrics[label] = (var_score, ent_score)
-        betas_by_label[label] = betas
+        all_betas.append(betas)
+
+    betas_all = np.concatenate(all_betas, axis=0) if all_betas else np.zeros((0, 0), dtype=np.float32)
+    var_score = _variation_score(betas_all)
+    ent_score = _entropy_score(betas_all, bins=args.entropy_bins)
 
     plot_body_shape_variation(
-        metrics=metrics,
-        betas_by_label=betas_by_label,
+        variance_score=var_score,
+        entropy_score=ent_score,
+        betas_all=betas_all,
         out_dir=args.out_dir,
         stem=args.stem,
         show_legend=not args.no_legend,
     )
 
-    print("Body shape variation scores:")
-    for label, (var_score, ent_score) in metrics.items():
-        print(f"  {label}: variance={var_score:.4f}, entropy={ent_score:.4f}")
+    print("Body shape variation scores (overall dataset):")
+    print(f"  Overall: variance={var_score:.4f}, entropy={ent_score:.4f}")
 
     return 0
 
