@@ -276,46 +276,32 @@ def plot_ethnicity_multimodal_tsne(
     _eccv_axes_style()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    unique_clusters = sorted(set(cluster_ids.tolist()))
+    unique_groups = sorted({s.ethnicity_group for s in samples})
     cmap = plt.get_cmap("tab20")
-    cluster_colors = {c: cmap(i % 20) for i, c in enumerate(unique_clusters)}
+    group_colors = {g: cmap(i % 20) for i, g in enumerate(unique_groups)}
     gender_markers = {"female": "^", "male": "o"}
 
     fig, ax = plt.subplots(figsize=(10.0, 7.6), dpi=150)
 
     coords_arr = np.asarray(coords)
-    cluster_arr = np.asarray(cluster_ids)
     gender_arr = np.asarray([s.gender for s in samples])
+    group_arr = np.asarray([s.ethnicity_group for s in samples])
 
-    for c in unique_clusters:
+    for group in unique_groups:
         for gender in ("female", "male"):
-            mask = (cluster_arr == c) & (gender_arr == gender)
+            mask = (group_arr == group) & (gender_arr == gender)
             if not np.any(mask):
                 continue
             ax.scatter(
                 coords_arr[mask, 0],
                 coords_arr[mask, 1],
                 s=18,
-                color=cluster_colors[c],
+                color=group_colors[group],
                 marker=gender_markers[gender],
                 alpha=0.68,
                 edgecolors="white",
                 linewidths=0.18,
             )
-
-    cluster_sizes = {c: int(np.sum(cluster_arr == c)) for c in unique_clusters}
-    centroids = compute_centroids(coords_arr, cluster_arr)
-    captions = [s.caption for s in samples]
-    label_texts = semantic_label_from_captions(captions, cluster_arr)
-    min_points = max(12, int(round(len(samples) * min_cluster_fraction_for_label)))
-    place_non_overlapping_annotations(
-        ax,
-        centroids,
-        label_texts,
-        cluster_sizes,
-        max_labels=max_labels,
-        min_points_to_label=min_points,
-    )
 
     ax.set_title("")
     ax.set_xlabel("")
@@ -329,25 +315,22 @@ def plot_ethnicity_multimodal_tsne(
         plt.Line2D([0], [0], marker="o", color="#333333", linestyle="None", markersize=6, label="Male"),
     ]
 
-    cluster_handles = []
-    for c in unique_clusters:
-        label_preview = label_texts.get(c, f"cluster_{c}")
-        if len(label_preview) > 30:
-            label_preview = label_preview[:27] + "..."
-        cluster_handles.append(
+    ethnicity_handles = []
+    for group in unique_groups:
+        ethnicity_handles.append(
             plt.Line2D(
                 [0], [0],
                 marker="o",
                 color="w",
-                markerfacecolor=cluster_colors[c],
+                markerfacecolor=group_colors[group],
                 markeredgecolor="white",
                 markeredgewidth=0.3,
                 markersize=6,
-                label=f"C{c} (n={cluster_sizes[c]}): {label_preview}",
+                label=group,
             )
         )
 
-    leg1 = ax.legend(handles=cluster_handles[: min(len(cluster_handles), 10)], loc="upper left", bbox_to_anchor=(1.01, 1.0), title="Cluster groups")
+    leg1 = ax.legend(handles=ethnicity_handles, loc="upper left", bbox_to_anchor=(1.01, 1.0), title="Ethnicity group")
     ax.add_artist(leg1)
     ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender marker")
 

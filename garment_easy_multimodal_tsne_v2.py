@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 # Limit BLAS thread counts early to avoid OpenBLAS over-threading crashes.
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "32")
@@ -23,14 +24,17 @@ from sklearn.cluster import KMeans
 from sklearn.manifold import TSNE
 from tqdm import tqdm
 
+from dress_info import DRESS_INFO
+
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+CATEGORY_ORDER = ["upper_body", "lower_body", "dresses", "uncertain"]
 
 
 @dataclass(frozen=True)
 class Sample:
     image_path: Path
-    gender: str
+    category: str
     cloth_name: str
 
 
@@ -118,6 +122,30 @@ class SD15CLIPMultimodalEmbedder:
         return np.concatenate(all_embeddings, axis=0)
 
 
+def normalize_garment_name(name: str) -> str:
+    cleaned = name.lower().replace("_", " ").replace("-", " ")
+    cleaned = re.sub(r"[^a-z0-9 ]+", " ", cleaned)
+    return " ".join(cleaned.split())
+
+
+def build_name_to_category() -> Dict[str, str]:
+    name_to_category: Dict[str, str] = {}
+    for entry in DRESS_INFO:
+        raw_name = str(entry.get("name", "")).strip()
+        category = str(entry.get("category", "uncertain")).strip()
+        if not raw_name:
+            continue
+        name_to_category[normalize_garment_name(raw_name)] = category
+    return name_to_category
+
+
+def resolve_category(cloth_name: str, name_to_category: Dict[str, str]) -> str:
+    key = normalize_garment_name(cloth_name)
+    if key in name_to_category:
+        return name_to_category[key]
+    return "uncertain"
+
+
 def extract_cloth_name_from_stem(stem: str) -> str:
     """
     Parse cloth name from naming convention:
@@ -139,7 +167,7 @@ def extract_cloth_name_from_stem(stem: str) -> str:
     return cloth_name.replace("-", " ")
 
 
-def discover_samples(root_dir: Path) -> List[Sample]:
+def discover_samples(root_dir: Path, name_to_category: Dict[str, str]) -> List[Sample]:
     """
     Expected tree:
       root/female/cloth_image/*.png
@@ -158,13 +186,14 @@ def discover_samples(root_dir: Path) -> List[Sample]:
                 continue
 
             cloth_name = extract_cloth_name_from_stem(path.stem)
-            samples.append(Sample(image_path=path, gender=gender, cloth_name=cloth_name))
+            category = resolve_category(cloth_name, name_to_category)
+            samples.append(Sample(image_path=path, category=category, cloth_name=cloth_name))
 
     return samples
 
 
-def sample_by_ratio_per_gender(samples: Sequence[Sample], sample_ratio: float, seed: int) -> List[Sample]:
-    """Random stratified sampling per gender (never sequential slicing)."""
+def sample_by_ratio_per_category(samples: Sequence[Sample], sample_ratio: float, seed: int) -> List[Sample]:
+    """Random stratified sampling per category (never sequential slicing)."""
     if sample_ratio >= 1.0:
         return list(samples)
     if sample_ratio <= 0.0:
@@ -173,8 +202,9 @@ def sample_by_ratio_per_gender(samples: Sequence[Sample], sample_ratio: float, s
     rng = np.random.default_rng(seed)
     out: List[Sample] = []
 
-    for gender in ("female", "male"):
-        cls = [s for s in samples if s.gender == gender]
+    categories = [c for c in CATEGORY_ORDER if any(s.category == c for s in samples)]
+    for category in categories:
+        cls = [s for s in samples if s.category == category]
         if not cls:
             continue
 
@@ -296,78 +326,6 @@ def compute_centroids(coords: np.ndarray, cluster_ids: np.ndarray) -> Dict[int, 
     return centroids
 
 
-def place_non_overlapping_annotations(
-    ax,
-    centroids: Dict[int, np.ndarray],
-    label_texts: Dict[int, str],
-    cluster_sizes: Dict[int, int],
-    max_labels: int,
-    min_points_to_label: int,
-) -> None:
-    """
-    Add sparse cluster labels with greedy collision avoidance in data space.
-    """
-    if not centroids:
-        return
-
-    xlim = ax.get_xlim()
-    ylim = ax.get_ylim()
-    span_x = max(1e-8, xlim[1] - xlim[0])
-    span_y = max(1e-8, ylim[1] - ylim[0])
-    min_dx = 0.07 * span_x
-    min_dy = 0.07 * span_y
-
-    ranked = sorted(cluster_sizes.items(), key=lambda kv: kv[1], reverse=True)
-    ranked = [(c, s) for c, s in ranked if s >= min_points_to_label]
-    if not ranked:
-        ranked = sorted(cluster_sizes.items(), key=lambda kv: kv[1], reverse=True)
-    ranked = ranked[:max_labels]
-
-    placed: List[Tuple[float, float]] = []
-
-    for c, _sz in ranked:
-        base = centroids[c]
-        bx, by = float(base[0]), float(base[1])
-
-        found_x, found_y = bx, by
-        found = False
-
-        for step in range(20):
-            if step == 0:
-                cand_x, cand_y = bx, by
-            else:
-                ring = (step + 1) // 2
-                sign = -1.0 if step % 2 == 0 else 1.0
-                cand_x = bx + sign * ring * 0.02 * span_x
-                cand_y = by + sign * ring * 0.02 * span_y
-
-            ok = True
-            for px, py in placed:
-                if abs(cand_x - px) < min_dx and abs(cand_y - py) < min_dy:
-                    ok = False
-                    break
-            if ok:
-                found_x, found_y = cand_x, cand_y
-                found = True
-                break
-
-        if not found:
-            found_x, found_y = bx, by
-
-        placed.append((found_x, found_y))
-
-        ax.annotate(
-            label_texts.get(c, f"cluster_{c}"),
-            xy=(bx, by),
-            xytext=(found_x, found_y),
-            fontsize=8,
-            ha="center",
-            va="center",
-            bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "alpha": 0.86, "edgecolor": "#666"},
-            arrowprops={"arrowstyle": "-", "color": "#777", "lw": 0.7, "alpha": 0.8},
-        )
-
-
 def _eccv_axes_style() -> None:
     plt.style.use("seaborn-v0_8-whitegrid")
     plt.rcParams.update(
@@ -391,7 +349,7 @@ def plot_clustered_tsne(
     coords: np.ndarray,
     cluster_ids: np.ndarray,
     cloth_names: Sequence[str],
-    genders: Sequence[str],
+    categories: Sequence[str],
     out_dir: Path,
     stem: str,
     max_labels: int,
@@ -403,17 +361,22 @@ def plot_clustered_tsne(
     unique_clusters = sorted(set(cluster_ids.tolist()))
     cmap = plt.get_cmap("tab20")
     cluster_colors = {c: cmap(i % 20) for i, c in enumerate(unique_clusters)}
-    gender_markers = {"female": "^", "male": "o"}
+    category_markers = {
+        "upper_body": "^",
+        "lower_body": "s",
+        "dresses": "o",
+        "uncertain": "x",
+    }
 
     fig, ax = plt.subplots(figsize=(9.5, 7.4), dpi=150)
 
     coords_arr = np.asarray(coords)
     cluster_arr = np.asarray(cluster_ids)
-    gender_arr = np.asarray(genders)
+    category_arr = np.asarray(categories)
 
     for c in unique_clusters:
-        for gender in ("female", "male"):
-            mask = (cluster_arr == c) & (gender_arr == gender)
+        for category in CATEGORY_ORDER:
+            mask = (cluster_arr == c) & (category_arr == category)
             if not np.any(mask):
                 continue
             ax.scatter(
@@ -421,7 +384,7 @@ def plot_clustered_tsne(
                 coords_arr[mask, 1],
                 s=22,
                 color=cluster_colors[c],
-                marker=gender_markers[gender],
+                marker=category_markers[category],
                 alpha=0.72,
                 edgecolors="white",
                 linewidths=0.2,
@@ -451,7 +414,7 @@ def plot_clustered_tsne(
         bbox={"boxstyle": "round,pad=0.28", "facecolor": "white", "alpha": 0.88, "edgecolor": "#888"},
     )
 
-    # Compact legends: cluster color mapping and gender marker mapping.
+    # Compact legends: cluster color mapping and category marker mapping.
     cluster_handles = []
     for c in unique_clusters:
         label_preview = label_texts.get(c, f"cluster_{c}")
@@ -465,14 +428,20 @@ def plot_clustered_tsne(
             )
         )
 
-    gender_handles = [
-        plt.Line2D([0], [0], marker="^", color="#333333", linestyle="None", markersize=6, label="Female"),
-        plt.Line2D([0], [0], marker="o", color="#333333", linestyle="None", markersize=6, label="Male"),
-    ]
+    category_handles = []
+    for category in CATEGORY_ORDER:
+        if category not in set(categories):
+            continue
+        category_handles.append(
+            plt.Line2D(
+                [0], [0], marker=category_markers[category], color="#333333",
+                linestyle="None", markersize=6, label=category.replace("_", " ").title()
+            )
+        )
 
     leg1 = ax.legend(handles=cluster_handles, loc="upper left", bbox_to_anchor=(1.01, 1.0), title="Cluster legend")
     ax.add_artist(leg1)
-    ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender marker")
+    ax.legend(handles=category_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Garment category")
 
     fig.tight_layout()
     png_path = out_dir / f"{stem}.png"
@@ -486,7 +455,7 @@ def plot_clustered_tsne(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Cluster multimodal garment embeddings (image + cloth-name text) and plot labeled t-SNE."
+        description="Cluster multimodal garment embeddings (image + cloth-name text) and plot labeled t-SNE by body category."
     )
     parser.add_argument(
         "--data-root",
@@ -513,7 +482,7 @@ def parse_args() -> argparse.Namespace:
         "--sample-ratio",
         type=float,
         default=0.25,
-        help="Fraction of each gender to use (default: 0.25 = 25%), sampled randomly.",
+        help="Fraction of each category to use (default: 0.25 = 25%), sampled randomly.",
     )
     parser.add_argument(
         "--fuse-alpha",
@@ -557,22 +526,25 @@ def main() -> int:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    samples = discover_samples(args.data_root)
+    name_to_category = build_name_to_category()
+    samples = discover_samples(args.data_root, name_to_category)
     if not samples:
         raise RuntimeError(
             "No garment images found. Expected: root/female/cloth_image/* and root/male/cloth_image/*"
         )
 
-    samples = sample_by_ratio_per_gender(samples, args.sample_ratio, args.seed)
+    samples = sample_by_ratio_per_category(samples, args.sample_ratio, args.seed)
 
     image_paths = [s.image_path for s in samples]
-    genders = [s.gender for s in samples]
+    categories = [s.category for s in samples]
     cloth_names = [s.cloth_name for s in samples]
 
     print(f"Found {len(samples)} sampled garments")
-    print(f"Sampling ratio per gender: {args.sample_ratio:.0%} (random, seed={args.seed})")
-    print(f"  Female: {sum(1 for g in genders if g == 'female')}")
-    print(f"  Male:   {sum(1 for g in genders if g == 'male')}")
+    print(f"Sampling ratio per category: {args.sample_ratio:.0%} (random, seed={args.seed})")
+    for category in CATEGORY_ORDER:
+        count = sum(1 for c in categories if c == category)
+        if count:
+            print(f"  {category}: {count}")
     print(f"Using device: {args.device}")
     print(f"CLIP model: {args.clip_model_id}")
 
@@ -595,7 +567,7 @@ def main() -> int:
             fused_embeddings=fused,
             cluster_ids=cluster_ids,
             cloth_names=np.asarray(cloth_names),
-            genders=np.asarray(genders),
+            categories=np.asarray(categories),
             image_paths=np.asarray([str(p) for p in image_paths]),
         )
         print(f"Saved embeddings to: {npz_path}")
@@ -604,7 +576,7 @@ def main() -> int:
         coords=tsne_coords,
         cluster_ids=cluster_ids,
         cloth_names=cloth_names,
-        genders=genders,
+        categories=categories,
         out_dir=args.out_dir,
         stem="garment_multimodal_clustered_tsne",
         max_labels=args.max_labels,
