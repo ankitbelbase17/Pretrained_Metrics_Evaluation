@@ -10,42 +10,54 @@ import torch
 
 
 def add_autogen_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
+    existing_opts = set()
+    for action in parser._actions:
+        for opt in getattr(action, "option_strings", []):
+            existing_opts.add(opt)
+
+    def _add_argument_if_missing(*names, **kwargs):
+        if any(name in existing_opts for name in names):
+            return
+        parser.add_argument(*names, **kwargs)
+        for name in names:
+            existing_opts.add(name)
+
+    _add_argument_if_missing(
         "--curvton-root",
         type=Path,
         default=None,
         help="CurvTON base path (overrides CURVTON_ROOT).",
     )
-    parser.add_argument(
+    _add_argument_if_missing(
         "--no-auto-generate",
         action="store_true",
         help="Disable auto-generation of missing CurvTON caches.",
     )
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--num-workers", type=int, default=8)
-    parser.add_argument("--gender", type=str, default="all", choices=["all", "male", "female"])
-    parser.add_argument("--max-samples", type=int, default=None)
-    parser.add_argument("--img-size", type=int, nargs=2, default=(512, 384))
-    parser.add_argument(
+    _add_argument_if_missing("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    _add_argument_if_missing("--batch-size", type=int, default=16)
+    _add_argument_if_missing("--num-workers", type=int, default=8)
+    _add_argument_if_missing("--gender", type=str, default="all", choices=["all", "male", "female"])
+    _add_argument_if_missing("--max-samples", type=int, default=None)
+    _add_argument_if_missing("--img-size", type=int, nargs=2, default=(512, 384))
+    _add_argument_if_missing(
         "--garment-backend",
         type=str,
         default="ensemble",
         choices=["ensemble", "fashion_clip", "dinov2", "sd_clip"],
         help="Garment embedding backend for cache generation.",
     )
-    parser.add_argument(
+    _add_argument_if_missing(
         "--sd-clip-model-id",
         type=str,
         default="openai/clip-vit-large-patch14",
         help="Model id to use when --garment-backend=sd_clip.",
     )
-    parser.add_argument(
+    _add_argument_if_missing(
         "--force-cache",
         action="store_true",
         help="Overwrite existing cache files during auto-generation.",
     )
-    parser.add_argument(
+    _add_argument_if_missing(
         "--occ-maps-dir",
         type=Path,
         default=None,
