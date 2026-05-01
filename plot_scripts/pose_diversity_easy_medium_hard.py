@@ -130,35 +130,59 @@ def plot_pose_diversity(
     show_legend: bool,
 ) -> None:
     _apply_eccv_style()
-    colors = _difficulty_colors()
+    base_colors = _difficulty_colors()
+    colors = {
+        "Easy": base_colors["Easy"],
+        "Medium": base_colors["Medium"],
+        "Hard": base_colors["Hard"],
+    }
 
-    labels = ["Easy", "Medium", "Hard"]
-    x = np.arange(len(labels))
-    width = 0.34
+    difficulties = ["Easy", "Medium", "Hard"]
+    metric_labels = ["Pose Variance", "Angle Variance"]
 
-    pose_vals = [metrics[lbl][0] for lbl in labels]
-    angle_vals = [metrics[lbl][1] for lbl in labels]
+    # Normalize each metric across splits so both dimensions are visually comparable on radar.
+    pose_vals = np.array([metrics[d][0] for d in difficulties], dtype=np.float32)
+    angle_vals = np.array([metrics[d][1] for d in difficulties], dtype=np.float32)
 
-    fig, ax = plt.subplots(figsize=(5.4, 3.2))
+    def _normalize(vals: np.ndarray) -> np.ndarray:
+        vmin = float(np.min(vals))
+        vmax = float(np.max(vals))
+        if vmax - vmin < 1e-8:
+            return np.full_like(vals, 0.5, dtype=np.float32)
+        return (vals - vmin) / (vmax - vmin)
 
-    ax.bar(x - width / 2, pose_vals, width, color=[colors[l] for l in labels], alpha=0.85, label="Pose variance")
-    ax.bar(x + width / 2, angle_vals, width, color=[colors[l] for l in labels], alpha=0.45, label="Angle variance")
+    pose_norm = _normalize(pose_vals)
+    angle_norm = _normalize(angle_vals)
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=9, fontweight="bold")
+    n_axes = len(metric_labels)
+    angles = np.linspace(0, 2 * np.pi, n_axes, endpoint=False)
+    angles_closed = np.concatenate([angles, [angles[0]]])
 
-    # Keep the figure clean: no axis labels, minimal ticks.
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    ax.tick_params(axis="y", left=False, labelleft=False)
-    ax.tick_params(axis="x", bottom=False)
+    fig, ax = plt.subplots(figsize=(4.8, 4.0), subplot_kw={"polar": True})
+    fig.patch.set_facecolor("white")
 
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.6)
-        spine.set_color("#cccccc")
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_ylim(0.0, 1.0)
+    ax.set_xticks(angles)
+    ax.set_xticklabels(metric_labels, fontsize=8)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels([])
+    ax.grid(color="#D9DEE7", linewidth=0.8, alpha=0.9)
+    ax.spines["polar"].set_color("#C5CCD8")
+    ax.spines["polar"].set_linewidth(0.8)
+
+    for i, d in enumerate(difficulties):
+        vals = np.array([pose_norm[i], angle_norm[i]], dtype=np.float32)
+        vals_closed = np.concatenate([vals, [vals[0]]])
+        ax.plot(angles_closed, vals_closed, color=colors[d], linewidth=1.8, label=d)
+        ax.fill(angles_closed, vals_closed, color=colors[d], alpha=0.20)
+
+    # Minimal center annotation for readability in publication context.
+    ax.text(0.0, 0.0, "Normalized\n0-1", ha="center", va="center", fontsize=7, color="#5A6372")
 
     if show_legend:
-        ax.legend(loc="upper right", framealpha=0.9, fontsize=8)
+        ax.legend(loc="upper right", bbox_to_anchor=(1.22, 1.12), framealpha=0.95, fontsize=8)
 
     fig.tight_layout()
     _save_fig(fig, out_dir, stem)
