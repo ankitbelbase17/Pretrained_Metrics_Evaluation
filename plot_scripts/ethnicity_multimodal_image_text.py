@@ -433,17 +433,16 @@ def plot_multimodal_tsne(
         handles=ethnicity_handles,
         loc="upper left",
         bbox_to_anchor=(1.01, 1.0),
-        title="Ethnicity",
         framealpha=0.95,
     )
     ax.add_artist(leg1)
-    ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender", framealpha=0.95)
+    leg2 = ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), framealpha=0.95)
 
     fig.tight_layout()
     png_path = out_dir / f"{stem}.png"
     pdf_path = out_dir / f"{stem}.pdf"
-    fig.savefig(png_path, dpi=450, bbox_inches="tight")
-    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(png_path, dpi=450, bbox_inches="tight", bbox_extra_artists=(leg1, leg2))
+    fig.savefig(pdf_path, bbox_inches="tight", bbox_extra_artists=(leg1, leg2))
     plt.close(fig)
     return png_path, pdf_path
 

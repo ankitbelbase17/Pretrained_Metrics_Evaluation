@@ -85,6 +85,33 @@ ETHNICITY_GROUPS: Dict[str, List[str]] = {
     "Indigenous Traditions": ["Inuit", "Maori", "Aboriginal", "Ainu", "Mapuche"],
 }
 
+BROAD_GROUP_ORDER = [
+    "South Asia",
+    "East Asia",
+    "Southeast Asia",
+    "Central & West Asia / Middle East",
+    "Africa (Pan-African)",
+    "Indigenous & First Peoples",
+    "Latin America (incl. Caribbean)",
+    "North America (Western)",
+    "Western & Northern Europe",
+    "Southern & Eastern Europe / Russia",
+]
+
+BROAD_GROUP_MAP = {
+    "South Asian Traditions": "South Asia",
+    "East Asian Traditions": "East Asia",
+    "Southeast Asian Traditions": "Southeast Asia",
+    "Middle Eastern Traditions": "Central & West Asia / Middle East",
+    "North African Traditions": "Africa (Pan-African)",
+    "Sub-Saharan African Traditions": "Africa (Pan-African)",
+    "European Traditions": "Western & Northern Europe",
+    "Latin American Traditions": "Latin America (incl. Caribbean)",
+    "North American Traditions": "North America (Western)",
+    "Oceanic Traditions": "Indigenous & First Peoples",
+    "Indigenous Traditions": "Indigenous & First Peoples",
+}
+
 GENDER_WORDS = ["female", "male"]
 
 
@@ -277,8 +304,9 @@ def plot_ethnicity_multimodal_tsne(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     unique_groups = sorted({s.ethnicity_group for s in samples})
+    broad_groups = [g for g in BROAD_GROUP_ORDER if g in {BROAD_GROUP_MAP.get(x, x) for x in unique_groups}]
     cmap = plt.get_cmap("tab20")
-    group_colors = {g: cmap(i % 20) for i, g in enumerate(unique_groups)}
+    group_colors = {g: cmap(i % 20) for i, g in enumerate(broad_groups)}
     gender_markers = {"female": "^", "male": "o"}
 
     fig, ax = plt.subplots(figsize=(10.0, 7.6), dpi=150)
@@ -286,10 +314,11 @@ def plot_ethnicity_multimodal_tsne(
     coords_arr = np.asarray(coords)
     gender_arr = np.asarray([s.gender for s in samples])
     group_arr = np.asarray([s.ethnicity_group for s in samples])
+    broad_arr = np.asarray([BROAD_GROUP_MAP.get(g, g) for g in group_arr])
 
-    for group in unique_groups:
+    for group in broad_groups:
         for gender in ("female", "male"):
-            mask = (group_arr == group) & (gender_arr == gender)
+            mask = (broad_arr == group) & (gender_arr == gender)
             if not np.any(mask):
                 continue
             ax.scatter(
@@ -316,7 +345,7 @@ def plot_ethnicity_multimodal_tsne(
     ]
 
     ethnicity_handles = []
-    for group in unique_groups:
+    for group in broad_groups:
         ethnicity_handles.append(
             plt.Line2D(
                 [0], [0],
@@ -330,15 +359,15 @@ def plot_ethnicity_multimodal_tsne(
             )
         )
 
-    leg1 = ax.legend(handles=ethnicity_handles, loc="upper left", bbox_to_anchor=(1.01, 1.0), title="Ethnicity group")
+    leg1 = ax.legend(handles=ethnicity_handles, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     ax.add_artist(leg1)
-    ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender marker")
+    leg2 = ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0))
 
-    fig.tight_layout(rect=[0, 0, 0.78, 1])
+    fig.tight_layout()
     png_path = out_dir / f"{stem}.png"
     pdf_path = out_dir / f"{stem}.pdf"
-    fig.savefig(png_path, dpi=450, bbox_inches="tight")
-    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(png_path, dpi=450, bbox_inches="tight", bbox_extra_artists=(leg1, leg2))
+    fig.savefig(pdf_path, bbox_inches="tight", bbox_extra_artists=(leg1, leg2))
     plt.close(fig)
     return png_path, pdf_path
 

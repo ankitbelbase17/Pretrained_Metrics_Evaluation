@@ -456,15 +456,15 @@ def plot_clustered_tsne(
         plt.Line2D([0], [0], marker="o", color="#333333", linestyle="None", markersize=6, label="Male"),
     ]
 
-    leg1 = ax.legend(handles=cluster_handles, loc="upper left", bbox_to_anchor=(1.01, 1.0), title="Cluster legend")
+    leg1 = ax.legend(handles=cluster_handles, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     ax.add_artist(leg1)
-    ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender marker")
+    leg2 = ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0))
 
-    fig.tight_layout(rect=[0, 0, 0.78, 1])
+    fig.tight_layout()
     png_path = out_dir / f"{stem}.png"
     pdf_path = out_dir / f"{stem}.pdf"
-    fig.savefig(png_path, dpi=450, bbox_inches="tight")
-    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(png_path, dpi=450, bbox_inches="tight", bbox_extra_artists=(leg1, leg2))
+    fig.savefig(pdf_path, bbox_inches="tight", bbox_extra_artists=(leg1, leg2))
     plt.close(fig)
 
     return png_path, pdf_path
