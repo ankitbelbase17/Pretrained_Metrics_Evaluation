@@ -47,15 +47,15 @@ def _difficulty_colors() -> Dict[str, str]:
         from EDA.plot_style import CURVTON_COLORS
 
         return {
-            "Easy": CURVTON_COLORS.get("Easy", "#1B9E77"),
-            "Medium": CURVTON_COLORS.get("Medium", "#D95F02"),
-            "Hard": CURVTON_COLORS.get("Hard", "#7570B3"),
+            "Easy": CURVTON_COLORS.get("Easy", "#67C3A5"),
+            "Medium": CURVTON_COLORS.get("Medium", "#F4A261"),
+            "Hard": CURVTON_COLORS.get("Hard", "#A59AD6"),
         }
     except Exception:
         return {
-            "Easy": "#1B9E77",
-            "Medium": "#D95F02",
-            "Hard": "#7570B3",
+            "Easy": "#67C3A5",
+            "Medium": "#F4A261",
+            "Hard": "#A59AD6",
         }
 
 
@@ -104,23 +104,7 @@ def _iqr_bounds(values: np.ndarray) -> Tuple[float, float]:
 
 
 def _compute_global_bounds(datasets: Dict[str, Tuple[np.ndarray, np.ndarray]]) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-    az_all = np.concatenate([_wrap_azimuth(v[0]) for v in datasets.values()])
-    el_all = np.concatenate([v[1] for v in datasets.values()])
-
-    az_low, az_high = _iqr_bounds(az_all)
-    el_low, el_high = _iqr_bounds(el_all)
-
-    az_low = max(0.0, az_low)
-    az_high = min(360.0, az_high)
-    el_low = max(-45.0, el_low)
-    el_high = min(45.0, el_high)
-
-    if az_high <= az_low:
-        az_low, az_high = 0.0, 360.0
-    if el_high <= el_low:
-        el_low, el_high = -45.0, 45.0
-
-    return (az_low, az_high), (el_low, el_high)
+    return (-180.0, 180.0), (-45.0, 45.0)
 
 
 def _smooth2d(H: np.ndarray, iters: int = 2) -> np.ndarray:
@@ -176,6 +160,7 @@ def plot_camera_scatter(
             continue
         az, el = datasets[label]
         az = _wrap_azimuth(az)
+        az = np.where(az > 180.0, az - 360.0, az)
         az = np.clip(az, az_low, az_high)
         el = np.clip(el, el_low, el_high)
 
@@ -187,23 +172,27 @@ def plot_camera_scatter(
             az = az[idx]
             el = el[idx]
 
-        az_plot = (az - az_low) / az_span * 360.0
-        el_plot = (el - el_low) / el_span * 90.0
+        az_plot = (az - az_low) / az_span * 360.0 - 180.0
+        el_plot = (el - el_low) / el_span * 90.0 - 45.0
 
         ax.scatter(
             az_plot,
             el_plot,
-            s=10,
+            s=14,
             color=colors[label],
-            alpha=0.30,
+            alpha=0.24,
             edgecolors="white",
             linewidths=0.15,
         )
 
     ax.set_xlabel("Azimuth (deg)")
     ax.set_ylabel("Elevation (deg)")
-    ax.set_xlim(0, 360)
-    ax.set_ylim(0, 90)
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(-45, 45)
+    ax.set_xticks(np.arange(-180, 181, 60))
+    ax.set_yticks(np.arange(-45, 46, 15))
+    ax.axvline(0.0, color="#9AA3B2", linewidth=0.8, alpha=0.8, zorder=1)
+    ax.axhline(0.0, color="#9AA3B2", linewidth=0.8, alpha=0.8, zorder=1)
     ax.grid(True, linestyle="--", linewidth=0.4, alpha=0.5)
 
     for spine in ax.spines.values():
@@ -237,7 +226,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/camera_angle_scatter"))
     parser.add_argument("--stem", type=str, default="camera_angle_scatter_easy_medium_hard")
-    parser.add_argument("--max-points-per-split", type=int, default=3000, help="Cap scatter points per split.")
+    parser.add_argument("--max-points-per-split", type=int, default=1500, help="Cap scatter points per split.")
     add_autogen_args(parser)
     return parser.parse_args()
 
