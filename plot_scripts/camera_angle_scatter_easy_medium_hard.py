@@ -158,9 +158,8 @@ def plot_camera_scatter(
     datasets: Dict[str, Tuple[np.ndarray, np.ndarray]],
     out_dir: Path,
     stem: str,
-    bins_az: int,
-    bins_el: int,
-    show_contours: bool,
+    max_points_per_split: int,
+    seed: int,
 ) -> None:
     _apply_eccv_style()
     colors = _difficulty_colors()
@@ -171,6 +170,7 @@ def plot_camera_scatter(
 
     fig, ax = plt.subplots(figsize=(6.8, 4.8), dpi=150)
 
+    rng = np.random.default_rng(seed)
     for label in ["Easy", "Medium", "Hard"]:
         if label not in datasets:
             continue
@@ -178,40 +178,27 @@ def plot_camera_scatter(
         az = _wrap_azimuth(az)
         az = np.clip(az, az_low, az_high)
         el = np.clip(el, el_low, el_high)
+
+        # Keep point density readable: neither too sparse nor too dense.
+        n = az.shape[0]
+        if n > max_points_per_split:
+            idx = rng.choice(n, size=max_points_per_split, replace=False)
+            idx = np.sort(idx)
+            az = az[idx]
+            el = el[idx]
+
         az_plot = (az - az_low) / az_span * 360.0
         el_plot = (el - el_low) / el_span * 90.0
 
         ax.scatter(
             az_plot,
             el_plot,
-            s=12,
+            s=10,
             color=colors[label],
-            alpha=0.35,
+            alpha=0.30,
             edgecolors="white",
-            linewidths=0.2,
+            linewidths=0.15,
         )
-
-        if show_contours:
-            H, xedges, yedges = np.histogram2d(
-                az_plot,
-                el_plot,
-                bins=[bins_az, bins_el],
-                range=[[0, 360], [0, 90]],
-            )
-            H = _smooth2d(H, iters=2)
-            X = 0.5 * (xedges[:-1] + xedges[1:])
-            Y = 0.5 * (yedges[:-1] + yedges[1:])
-            Xg, Yg = np.meshgrid(X, Y, indexing="xy")
-            levels = np.percentile(H[H > 0], [70, 85, 95]) if np.any(H > 0) else [1, 2, 3]
-            ax.contour(
-                Xg,
-                Yg,
-                H.T,
-                levels=levels,
-                colors=[colors[label]],
-                linewidths=1.2,
-                alpha=0.9,
-            )
 
     ax.set_xlabel("Azimuth (deg)")
     ax.set_ylabel("Elevation (deg)")
@@ -250,9 +237,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-dir", type=Path, default=Path("./outputs/camera_angle_scatter"))
     parser.add_argument("--stem", type=str, default="camera_angle_scatter_easy_medium_hard")
-    parser.add_argument("--bins-az", type=int, default=36)
-    parser.add_argument("--bins-el", type=int, default=18)
-    parser.add_argument("--no-contours", action="store_true", help="Disable density contours.")
+    parser.add_argument("--max-points-per-split", type=int, default=3000, help="Cap scatter points per split.")
     add_autogen_args(parser)
     return parser.parse_args()
 
@@ -312,9 +297,8 @@ def main() -> int:
         datasets=datasets,
         out_dir=args.out_dir,
         stem=args.stem,
-        bins_az=args.bins_az,
-        bins_el=args.bins_el,
-        show_contours=not args.no_contours,
+        max_points_per_split=args.max_points_per_split,
+        seed=args.seed,
     )
 
     return 0

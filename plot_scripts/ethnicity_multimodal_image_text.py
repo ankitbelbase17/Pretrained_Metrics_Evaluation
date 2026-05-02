@@ -416,10 +416,7 @@ def plot_multimodal_tsne(
                 linewidths=0.15,
             )
 
-    if show_labels:
-        centroids = _compute_centroids(coords_arr, cluster_arr)
-        label_texts = _cluster_label(samples, cluster_arr)
-        _place_labels(ax, centroids, label_texts, max_labels=max_labels)
+    # Keep main plot clean: no text annotations inside the scatter area.
 
     ax.set_title("")
     ax.set_xlabel("")
