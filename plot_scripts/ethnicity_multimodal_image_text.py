@@ -372,8 +372,6 @@ def _place_labels(ax, centroids: Dict[int, np.ndarray], label_texts: Dict[int, s
             fontsize=8,
             ha="center",
             va="center",
-            bbox={"boxstyle": "round,pad=0.20", "facecolor": "white", "alpha": 0.86, "edgecolor": "#666"},
-            arrowprops={"arrowstyle": "-", "color": "#777", "lw": 0.7, "alpha": 0.8},
         )
 
 
