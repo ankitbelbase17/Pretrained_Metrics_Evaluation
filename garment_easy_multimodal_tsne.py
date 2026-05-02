@@ -215,6 +215,22 @@ def run_tsne(embeddings: np.ndarray, seed: int, perplexity: float) -> np.ndarray
     return reducer.fit_transform(embeddings)
 
 
+def run_umap(embeddings: np.ndarray, seed: int, n_neighbors: int, min_dist: float) -> np.ndarray:
+    try:
+        import umap
+    except Exception as e:
+        raise RuntimeError("UMAP is not installed. Install with: pip install umap-learn") from e
+
+    reducer = umap.UMAP(
+        n_components=2,
+        metric="cosine",
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        random_state=seed,
+    )
+    return reducer.fit_transform(embeddings)
+
+
 def cluster_embeddings(embeddings: np.ndarray, n_clusters: int, seed: int) -> np.ndarray:
     n = embeddings.shape[0]
     k = max(2, min(n_clusters, max(2, n // 15)))
@@ -516,6 +532,8 @@ def parse_args() -> argparse.Namespace:
         help="Only annotate clusters with at least this fraction of samples (reduces label crowding).",
     )
     parser.add_argument("--tsne-perplexity", type=float, default=30.0)
+    parser.add_argument("--umap-neighbors", type=int, default=30)
+    parser.add_argument("--umap-min-dist", type=float, default=0.1)
     parser.add_argument(
         "--device",
         type=str,
@@ -569,6 +587,12 @@ def main() -> int:
     fused = fuse_embeddings(image_emb, text_emb, alpha=args.fuse_alpha)
     cluster_ids = cluster_embeddings(fused, n_clusters=args.n_clusters, seed=args.seed)
     tsne_coords = run_tsne(fused, seed=args.seed, perplexity=args.tsne_perplexity)
+    umap_coords = run_umap(
+        fused,
+        seed=args.seed,
+        n_neighbors=args.umap_neighbors,
+        min_dist=args.umap_min_dist,
+    )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -596,10 +620,22 @@ def main() -> int:
         max_labels=args.max_labels,
         min_cluster_fraction_for_label=args.min_cluster_fraction_for_label,
     )
+    umap_png, umap_pdf = plot_clustered_tsne(
+        coords=umap_coords,
+        cluster_ids=cluster_ids,
+        cloth_names=cloth_names,
+        genders=genders,
+        out_dir=args.out_dir,
+        stem="garment_multimodal_clustered_umap",
+        max_labels=args.max_labels,
+        min_cluster_fraction_for_label=args.min_cluster_fraction_for_label,
+    )
 
     print("Saved plots:")
     print(f"  {tsne_png}")
     print(f"  {tsne_pdf}")
+    print(f"  {umap_png}")
+    print(f"  {umap_pdf}")
 
     return 0
 

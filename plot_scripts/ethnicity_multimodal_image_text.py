@@ -263,6 +263,22 @@ def run_tsne(embeddings: np.ndarray, seed: int, perplexity: float) -> np.ndarray
     return reducer.fit_transform(embeddings)
 
 
+def run_umap(embeddings: np.ndarray, seed: int, n_neighbors: int, min_dist: float) -> np.ndarray:
+    try:
+        import umap
+    except Exception as e:
+        raise RuntimeError("UMAP is not installed. Install with: pip install umap-learn") from e
+
+    reducer = umap.UMAP(
+        n_components=2,
+        metric="cosine",
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        random_state=seed,
+    )
+    return reducer.fit_transform(embeddings)
+
+
 def cluster_embeddings(embeddings: np.ndarray, n_clusters: int, seed: int) -> np.ndarray:
     n = embeddings.shape[0]
     k = max(2, min(n_clusters, max(2, n // 200)))
@@ -492,6 +508,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-labels", type=int, default=8)
     parser.add_argument("--no-cluster-labels", action="store_true")
     parser.add_argument("--tsne-perplexity", type=float, default=40.0)
+    parser.add_argument("--umap-neighbors", type=int, default=30)
+    parser.add_argument("--umap-min-dist", type=float, default=0.1)
     parser.add_argument(
         "--include-body-type",
         action="store_true",
@@ -589,6 +607,12 @@ def main() -> int:
     fused = fuse_embeddings(image_emb, text_emb, alpha=args.fuse_alpha)
     cluster_ids = cluster_embeddings(fused, n_clusters=args.n_clusters, seed=args.seed)
     tsne_coords = run_tsne(fused, seed=args.seed, perplexity=args.tsne_perplexity)
+    umap_coords = run_umap(
+        fused,
+        seed=args.seed,
+        n_neighbors=args.umap_neighbors,
+        min_dist=args.umap_min_dist,
+    )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -618,10 +642,21 @@ def main() -> int:
         max_labels=args.max_labels,
         show_labels=not args.no_cluster_labels,
     )
+    umap_png, umap_pdf = plot_multimodal_tsne(
+        coords=umap_coords,
+        cluster_ids=cluster_ids,
+        samples=samples,
+        out_dir=args.out_dir,
+        stem="ethnicity_multimodal_image_text_umap",
+        max_labels=args.max_labels,
+        show_labels=not args.no_cluster_labels,
+    )
 
     print("Saved plots:")
     print(f"  {png_path}")
     print(f"  {pdf_path}")
+    print(f"  {umap_png}")
+    print(f"  {umap_pdf}")
 
     return 0
 
