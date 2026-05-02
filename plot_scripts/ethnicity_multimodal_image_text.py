@@ -28,6 +28,7 @@ class Sample:
     caption: str
     country: str
     ethnicity: str
+    broad_group: str
 
 
 class SD15CLIPMultimodalEmbedder:
@@ -189,6 +190,19 @@ def _sample_from_people_spec(
     return caption, country, ethnicity
 
 
+def _build_country_to_broad_group(spec: Dict) -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    groups = spec.get("broad_ethnicity_groups", {})
+    if not isinstance(groups, dict):
+        return mapping
+    for group_name, countries in groups.items():
+        if not isinstance(countries, list):
+            continue
+        for c in countries:
+            mapping[str(c)] = str(group_name)
+    return mapping
+
+
 def discover_samples(root_dir: Path) -> List[Tuple[Path, str]]:
     samples: List[Tuple[Path, str]] = []
 
@@ -282,16 +296,10 @@ def _cluster_label(samples: Sequence[Sample], cluster_ids: np.ndarray) -> Dict[i
         if not idxs:
             labels[c] = "Mixed"
             continue
-        countries = [samples[i].country for i in idxs]
-        ethnicities = [samples[i].ethnicity for i in idxs]
-        c1 = Counter(countries).most_common(1)
-        e1 = Counter(ethnicities).most_common(1)
-        if c1 and e1:
-            labels[c] = f"{c1[0][0]} / {e1[0][0]}"
-        elif c1:
-            labels[c] = str(c1[0][0])
-        elif e1:
-            labels[c] = str(e1[0][0])
+        broad_groups = [samples[i].broad_group for i in idxs]
+        g1 = Counter(broad_groups).most_common(1)
+        if g1:
+            labels[c] = str(g1[0][0])
         else:
             labels[c] = "Mixed"
     return labels
@@ -368,19 +376,19 @@ def plot_multimodal_tsne(
     unique_clusters = sorted(set(cluster_ids.tolist()))
     gender_markers = {"female": "^", "male": "o", "unknown": "s"}
 
-    fig, ax = plt.subplots(figsize=(10.0, 7.6), dpi=150)
+    fig, ax = plt.subplots(figsize=(12.0, 7.6), dpi=150)
 
     coords_arr = np.asarray(coords)
     cluster_arr = np.asarray(cluster_ids)
     gender_arr = np.asarray([s.gender for s in samples])
-    ethnicity_arr = np.asarray([s.ethnicity for s in samples])
-    unique_ethnicities = sorted(set(ethnicity_arr.tolist()))
+    broad_arr = np.asarray([s.broad_group for s in samples])
+    unique_groups = sorted(set(broad_arr.tolist()))
     eth_cmap = plt.get_cmap("tab20")
-    ethnicity_colors = {e: eth_cmap(i % 20) for i, e in enumerate(unique_ethnicities)}
+    ethnicity_colors = {e: eth_cmap(i % 20) for i, e in enumerate(unique_groups)}
 
-    for eth in unique_ethnicities:
+    for eth in unique_groups:
         for gender in ("female", "male", "unknown"):
-            mask = (ethnicity_arr == eth) & (gender_arr == gender)
+            mask = (broad_arr == eth) & (gender_arr == gender)
             if not np.any(mask):
                 continue
             ax.scatter(
@@ -416,7 +424,7 @@ def plot_multimodal_tsne(
         )
 
     ethnicity_handles = []
-    for eth in unique_ethnicities:
+    for eth in unique_groups:
         ethnicity_handles.append(
             plt.Line2D(
                 [0],
@@ -438,7 +446,7 @@ def plot_multimodal_tsne(
     ax.add_artist(leg1)
     leg2 = ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), framealpha=0.95)
 
-    fig.tight_layout()
+    fig.subplots_adjust(right=0.76)
     png_path = out_dir / f"{stem}.png"
     pdf_path = out_dir / f"{stem}.pdf"
     fig.savefig(png_path, dpi=450, bbox_inches="tight", bbox_extra_artists=(leg1, leg2))
@@ -460,7 +468,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--people-spec",
         type=Path,
-        default=Path("c:/Users/Dipan/Downloads/people (1).py"),
+        default=Path("./people_combined.py"),
         help="Path to people spec JSON file.",
     )
     parser.add_argument(
@@ -534,6 +542,7 @@ def main() -> int:
     torch.manual_seed(args.seed)
 
     spec = _load_people_spec(args.people_spec)
+    country_to_group = _build_country_to_broad_group(spec)
     rng = np.random.default_rng(args.seed)
 
     raw_samples = discover_samples(args.data_root)
@@ -562,6 +571,7 @@ def main() -> int:
                 caption=caption,
                 country=country,
                 ethnicity=ethnicity,
+                broad_group=country_to_group.get(country, "Other"),
             )
         )
 
@@ -594,6 +604,7 @@ def main() -> int:
             genders=np.asarray([s.gender for s in samples]),
             countries=np.asarray([s.country for s in samples]),
             ethnicities=np.asarray([s.ethnicity for s in samples]),
+            broad_groups=np.asarray([s.broad_group for s in samples]),
             image_paths=np.asarray([str(p) for p in image_paths]),
         )
         print(f"Saved embeddings to: {npz_path}")

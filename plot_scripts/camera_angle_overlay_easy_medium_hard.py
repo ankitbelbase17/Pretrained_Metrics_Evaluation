@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 import sys
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -59,34 +59,52 @@ def _difficulty_colors() -> Dict[str, str]:
         }
 
 
-def _load_angles(npz_path: Path) -> Tuple[np.ndarray, np.ndarray]:
+def _load_angles(npz_path: Path) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     data = dict(np.load(npz_path, allow_pickle=True))
     az = data.get("azimuths", data.get("azimuth", np.array([])))
     el = data.get("elevations", data.get("elevation", np.array([])))
+    conf = data.get("camera_confidence", None)
     az = np.asarray(az, dtype=np.float32)
     el = np.asarray(el, dtype=np.float32)
     if az.size == 0:
         raise KeyError(f"Missing azimuths in {npz_path}")
     if el.size == 0:
         el = np.zeros_like(az)
-    mask = np.isfinite(az) & np.isfinite(el)
-    return az[mask], el[mask]
+    if conf is None:
+        conf_arr = None
+        mask = np.isfinite(az) & np.isfinite(el)
+        return az[mask], el[mask], conf_arr
+    conf_arr = np.asarray(conf, dtype=np.float32)
+    if conf_arr.shape[0] != az.shape[0]:
+        conf_arr = None
+        mask = np.isfinite(az) & np.isfinite(el)
+        return az[mask], el[mask], conf_arr
+    mask = np.isfinite(az) & np.isfinite(el) & np.isfinite(conf_arr)
+    return az[mask], el[mask], conf_arr[mask]
 
 
-def _subsample_pair(az: np.ndarray, el: np.ndarray, sample_ratio: float, seed: int) -> Tuple[np.ndarray, np.ndarray]:
+def _subsample_triplet(
+    az: np.ndarray,
+    el: np.ndarray,
+    conf: Optional[np.ndarray],
+    sample_ratio: float,
+    seed: int,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     if sample_ratio >= 1.0:
-        return az, el
+        return az, el, conf
     if sample_ratio <= 0.0:
         raise ValueError("sample_ratio must be in (0, 1]")
     n = az.shape[0]
     if n <= 1:
-        return az, el
+        return az, el, conf
     rng = np.random.default_rng(seed)
     n_keep = max(1, int(round(n * sample_ratio)))
     n_keep = min(n_keep, n)
     idx = rng.choice(n, size=n_keep, replace=False)
     idx = np.sort(idx)
-    return az[idx], el[idx]
+    if conf is None:
+        return az[idx], el[idx], conf
+    return az[idx], el[idx], conf[idx]
 
 
 def _wrap_azimuth(az: np.ndarray) -> np.ndarray:
@@ -119,7 +137,7 @@ def _smooth2d(H: np.ndarray, iters: int = 2) -> np.ndarray:
 
 
 def plot_camera_overlay(
-    datasets: Dict[str, Tuple[np.ndarray, np.ndarray]],
+    datasets: Dict[str, Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]],
     out_dir: Path,
     stem: str,
     bins_az: int,
@@ -130,10 +148,45 @@ def plot_camera_overlay(
 
     fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=150, constrained_layout=True)
 
+    # Optional radius proxy intensity map from camera confidence (r), if available.
+    conf_maps = []
     for label in ["Easy", "Medium", "Hard"]:
         if label not in datasets:
             continue
-        az, el = datasets[label]
+        az, el, conf = datasets[label]
+        if conf is None or conf.shape[0] == 0:
+            continue
+        az = _wrap_azimuth(az)
+        el = np.clip(el, -90.0, 90.0)
+        H_sum, xedges, yedges = np.histogram2d(
+            az, el, bins=[bins_az, bins_el], range=[[-180, 180], [-90, 90]], weights=conf
+        )
+        H_cnt, _, _ = np.histogram2d(az, el, bins=[bins_az, bins_el], range=[[-180, 180], [-90, 90]])
+        H_mean = np.divide(H_sum, np.maximum(H_cnt, 1e-8), where=H_cnt > 0)
+        H_mean = _smooth2d(H_mean, iters=1)
+        conf_maps.append(H_mean)
+
+    if conf_maps:
+        conf_bg = np.mean(np.stack(conf_maps, axis=0), axis=0)
+        im = ax.imshow(
+            conf_bg.T,
+            origin="lower",
+            extent=[-180, 180, -90, 90],
+            cmap="magma",
+            alpha=0.30,
+            aspect="auto",
+            vmin=float(np.nanmin(conf_bg)),
+            vmax=float(np.nanmax(conf_bg)),
+            interpolation="bilinear",
+        )
+        cbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
+        cbar.ax.tick_params(labelsize=7)
+        cbar.set_label("r (camera confidence)", fontsize=8)
+
+    for label in ["Easy", "Medium", "Hard"]:
+        if label not in datasets:
+            continue
+        az, el, _ = datasets[label]
         az = _wrap_azimuth(az)
         el = np.clip(el, -90.0, 90.0)
         H, xedges, yedges = np.histogram2d(az, el, bins=[bins_az, bins_el], range=[[-180, 180], [-90, 90]])
@@ -154,12 +207,14 @@ def plot_camera_overlay(
             alpha=0.9,
         )
 
-    ax.set_xlabel("")
-    ax.set_ylabel("")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
-    ax.grid(False)
+    ax.set_xlabel("Azimuth (°)")
+    ax.set_ylabel("Elevation (°)")
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(-90, 90)
+    ax.set_xticks(np.arange(-180, 181, 60))
+    ax.set_yticks(np.arange(-90, 91, 30))
+    ax.tick_params(bottom=True, left=True, labelbottom=True, labelleft=True)
+    ax.grid(True, linestyle="--", alpha=0.22, linewidth=0.45)
 
     for spine in ax.spines.values():
         spine.set_linewidth(0.6)
@@ -240,16 +295,16 @@ def main() -> int:
         )
     _require_cache_files((args.easy, args.medium, args.hard))
 
-    datasets: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
+    datasets: Dict[str, Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]] = {}
     for label, path in [
         ("Easy", args.easy),
         ("Medium", args.medium),
         ("Hard", args.hard),
     ]:
-        az, el = _load_angles(path)
+        az, el, conf = _load_angles(path)
         if not auto_defaults:
-            az, el = _subsample_pair(az, el, forced_ratio, args.seed)
-        datasets[label] = (az, el)
+            az, el, conf = _subsample_triplet(az, el, conf, forced_ratio, args.seed)
+        datasets[label] = (az, el, conf)
 
     plot_camera_overlay(
         datasets=datasets,

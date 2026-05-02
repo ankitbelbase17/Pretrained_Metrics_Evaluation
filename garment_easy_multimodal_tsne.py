@@ -405,7 +405,7 @@ def plot_clustered_tsne(
     cluster_colors = {c: cmap(i % 20) for i, c in enumerate(unique_clusters)}
     gender_markers = {"female": "^", "male": "o"}
 
-    fig, ax = plt.subplots(figsize=(9.5, 7.4), dpi=150)
+    fig, ax = plt.subplots(figsize=(11.8, 7.4), dpi=150)
 
     coords_arr = np.asarray(coords)
     cluster_arr = np.asarray(cluster_ids)
@@ -447,7 +447,7 @@ def plot_clustered_tsne(
             plt.Line2D(
                 [0], [0], marker="o", color="w", markerfacecolor=cluster_colors[c],
                 markeredgecolor="white", markeredgewidth=0.3, markersize=7,
-                label=f"C{c}: {label_preview}"
+                label=label_preview
             )
         )
 
@@ -460,7 +460,7 @@ def plot_clustered_tsne(
     ax.add_artist(leg1)
     leg2 = ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0))
 
-    fig.tight_layout()
+    fig.subplots_adjust(right=0.74)
     png_path = out_dir / f"{stem}.png"
     pdf_path = out_dir / f"{stem}.pdf"
     fig.savefig(png_path, dpi=450, bbox_inches="tight", bbox_extra_artists=(leg1, leg2))
