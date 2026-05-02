@@ -417,7 +417,6 @@ def plot_multimodal_tsne(
 
     ethnicity_handles = []
     for eth in unique_ethnicities:
-        n_eth = int(np.sum(ethnicity_arr == eth))
         ethnicity_handles.append(
             plt.Line2D(
                 [0],
@@ -426,7 +425,7 @@ def plot_multimodal_tsne(
                 color=ethnicity_colors[eth],
                 linestyle="None",
                 markersize=5,
-                label=f"{eth} (n={n_eth})",
+                label=str(eth),
             )
         )
 

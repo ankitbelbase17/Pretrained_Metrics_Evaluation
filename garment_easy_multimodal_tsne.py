@@ -443,13 +443,11 @@ def plot_clustered_tsne(
     cluster_handles = []
     for c in unique_clusters:
         label_preview = label_texts.get(c, f"cluster_{c}")
-        if len(label_preview) > 34:
-            label_preview = label_preview[:31] + "..."
         cluster_handles.append(
             plt.Line2D(
                 [0], [0], marker="o", color="w", markerfacecolor=cluster_colors[c],
                 markeredgecolor="white", markeredgewidth=0.3, markersize=7,
-                label=f"C{c} (n={cluster_sizes[c]}): {label_preview}"
+                label=f"C{c}: {label_preview}"
             )
         )
 
