@@ -149,16 +149,14 @@ def plot_pose_diversity(
     feat_idx = _select_pose_feature_indices(pose_by_split, n_features=n_features)
     metric_labels: List[str] = [f"f{int(i)}" for i in feat_idx]
 
-    # Use global z-scored pose features first, then compute per-split variance.
-    # This avoids per-split min-max artifacts that force one split to 0 and another to 1.
-    all_pose = np.concatenate([pose_by_split[k] for k in difficulties], axis=0)
-    g_mu = all_pose.mean(axis=0, keepdims=True)
-    g_sig = all_pose.std(axis=0, keepdims=True) + 1e-8
-
+    # Normalize variance by mean magnitude per split to reduce scale discrepancies.
     per_split_feature_var: Dict[str, np.ndarray] = {}
     for d in difficulties:
-        pose_z = (pose_by_split[d] - g_mu) / g_sig
-        per_split_feature_var[d] = np.var(pose_z[:, feat_idx], axis=0)
+        pose = pose_by_split[d]
+        feat = pose[:, feat_idx]
+        mean_abs = np.mean(np.abs(feat), axis=0) + 1e-8
+        var = np.var(feat, axis=0)
+        per_split_feature_var[d] = var / (mean_abs ** 2)
 
     # Normalize for display across all plotted values (not per-feature across 3 splits).
     var_matrix = np.stack([per_split_feature_var[d] for d in difficulties], axis=0)  # (3, F)

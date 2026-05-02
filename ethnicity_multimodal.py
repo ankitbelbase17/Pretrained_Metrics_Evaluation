@@ -334,7 +334,7 @@ def plot_ethnicity_multimodal_tsne(
     ax.add_artist(leg1)
     ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender marker")
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 0.78, 1])
     png_path = out_dir / f"{stem}.png"
     pdf_path = out_dir / f"{stem}.pdf"
     fig.savefig(png_path, dpi=450, bbox_inches="tight")

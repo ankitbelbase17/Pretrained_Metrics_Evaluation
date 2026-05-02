@@ -438,18 +438,6 @@ def plot_clustered_tsne(
     ax.set_yticks([])
     ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
 
-    total = len(cloth_names)
-    n_unique_names = len(set(cloth_names))
-    ax.text(
-        0.01,
-        0.99,
-        f"Samples: {total} | Clusters: {len(unique_clusters)} | Unique names: {n_unique_names}",
-        transform=ax.transAxes,
-        ha="left",
-        va="top",
-        fontsize=10,
-        bbox={"boxstyle": "round,pad=0.28", "facecolor": "white", "alpha": 0.88, "edgecolor": "#888"},
-    )
 
     # Compact legends: cluster color mapping and gender marker mapping.
     cluster_handles = []
@@ -474,7 +462,7 @@ def plot_clustered_tsne(
     ax.add_artist(leg1)
     ax.legend(handles=gender_handles, loc="lower left", bbox_to_anchor=(1.01, 0.0), title="Gender marker")
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 0.78, 1])
     png_path = out_dir / f"{stem}.png"
     pdf_path = out_dir / f"{stem}.pdf"
     fig.savefig(png_path, dpi=450, bbox_inches="tight")
