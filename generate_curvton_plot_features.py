@@ -442,11 +442,11 @@ def parse_args() -> argparse.Namespace:
         description="Generate CurvTON feature caches for plot_scripts (easy/medium/hard/all)."
     )
     parser.add_argument("--base-path", type=str, required=True)
-    parser.add_argument("--cache-dir", type=Path, default=Path("./eda_cache/curvton"))
+    parser.add_argument("--cache-dir", type=Path, default=Path("./eda_cache/dipan/curvton"))
     parser.add_argument(
         "--occ-maps-dir",
         type=Path,
-        default=None,
+        default=Path("./eda_cache/dipan/occ_maps"),
         help="Optional separate directory to save occ_maps-only NPZ per difficulty.",
     )
     parser.add_argument("--sample-ratio", type=float, default=0.2)

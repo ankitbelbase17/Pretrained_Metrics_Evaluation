@@ -209,7 +209,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path("./eda_cache/curvton"),
+        default=Path("./eda_cache/dipan/curvton"),
         help="Default cache directory to resolve easy/medium/hard NPZs.",
     )
     parser.add_argument("--seed", type=int, default=42)

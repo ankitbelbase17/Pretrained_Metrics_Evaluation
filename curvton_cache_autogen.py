@@ -60,7 +60,7 @@ def add_autogen_args(parser: argparse.ArgumentParser) -> None:
     _add_argument_if_missing(
         "--occ-maps-dir",
         type=Path,
-        default=None,
+        default=Path("./eda_cache/dipan/occ_maps"),
         help="Directory for separate occ_maps-only caches (required for occlusion map workflows).",
     )
 
